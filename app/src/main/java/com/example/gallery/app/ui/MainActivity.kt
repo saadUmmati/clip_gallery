@@ -1,0 +1,148 @@
+package com.example.gallery.app.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.view.View
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import androidx.viewpager2.adapter.FragmentStateAdapter
+import androidx.work.WorkManager
+import com.example.gallery.app.R
+import com.example.gallery.app.databinding.ActivityMainBinding
+import com.example.gallery.app.ui.gallery.GalleryFragment
+import com.example.gallery.app.ui.optimize.OptimizeFragment
+import com.example.gallery.app.viewmodel.GalleryViewModel
+import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.tabs.TabLayoutMediator
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMainBinding
+    private val galleryViewModel: GalleryViewModel by viewModels()
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results.values.all { it }
+        if (granted) {
+            triggerScan()
+        } else {
+            showPermissionRationale()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        setupTabs()
+        observeScanState()
+        checkPermissionsAndScan()
+
+        supportFragmentManager.addOnBackStackChangedListener {
+            val hasBackStack = supportFragmentManager.backStackEntryCount > 0
+            findViewById<android.widget.FrameLayout>(R.id.nav_host_fragment)?.visibility =
+                if (hasBackStack) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun setupTabs() {
+        val adapter = MainPagerAdapter(this)
+        binding.viewPager.adapter = adapter
+        binding.viewPager.offscreenPageLimit = 2
+
+        TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
+            tab.text = when (position) {
+                0 -> "Gallery"
+                1 -> "Optimize"
+                else -> ""
+            }
+            tab.setIcon(when (position) {
+                0 -> R.drawable.ic_gallery
+                1 -> R.drawable.ic_optimize
+                else -> 0
+            })
+        }.attach()
+    }
+
+    private fun observeScanState() {
+        lifecycleScope.launch {
+            galleryViewModel.scanState.collectLatest { state ->
+                when (state) {
+                    is GalleryViewModel.ScanState.Scanning -> {
+                        binding.progressBar.visibility = View.VISIBLE
+                    }
+                    is GalleryViewModel.ScanState.Done -> {
+                        binding.progressBar.visibility = View.GONE
+                        if (state.count > 0) {
+                            Snackbar.make(
+                                binding.root,
+                                "Found ${state.count} photos",
+                                Snackbar.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                    is GalleryViewModel.ScanState.Error -> {
+                        binding.progressBar.visibility = View.GONE
+                    }
+                    else -> binding.progressBar.visibility = View.GONE
+                }
+            }
+        }
+    }
+
+    private fun checkPermissionsAndScan() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        val allGranted = permissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+
+        if (allGranted) {
+            triggerScan()
+        } else {
+            permissionLauncher.launch(permissions)
+        }
+    }
+
+    private fun triggerScan() {
+        galleryViewModel.triggerScan(WorkManager.getInstance(applicationContext))
+    }
+
+    private fun showPermissionRationale() {
+        Snackbar.make(
+            binding.root,
+            "Storage permission is required to view your photos",
+            Snackbar.LENGTH_INDEFINITE
+        ).setAction("Grant") {
+            checkPermissionsAndScan()
+        }.show()
+    }
+
+    inner class MainPagerAdapter(activity: AppCompatActivity) : FragmentStateAdapter(activity) {
+        override fun getItemCount() = 2
+        override fun createFragment(position: Int): Fragment = when (position) {
+            0 -> GalleryFragment()
+            1 -> OptimizeFragment()
+            else -> GalleryFragment()
+        }
+    }
+}

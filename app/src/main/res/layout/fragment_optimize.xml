@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background_primary">
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:paddingBottom="80dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- ── Storage Stats Card ── -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="12dp"
+                app:cardBackgroundColor="@color/surface_dark"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/stroke_subtle"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="STORAGE"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="11sp"
+                        android:letterSpacing="0.08" />
+
+                    <TextView
+                        android:id="@+id/reclaimableSize"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Calculating…"
+                        android:textColor="@color/accent_blue"
+                        android:textSize="22sp"
+                        android:fontFamily="sans-serif-medium" />
+
+                    <androidx.constraintlayout.widget.ConstraintLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnRunAi"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_marginEnd="8dp"
+                            android:text="Run AI Analysis"
+                            android:textSize="13sp"
+                            app:cornerRadius="8dp"
+                            app:backgroundTint="@color/accent_blue"
+                            app:layout_constraintStart_toStartOf="parent"
+                            app:layout_constraintEnd_toStartOf="@+id/btnViewRecycleBin"
+                            app:layout_constraintTop_toTopOf="parent" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnViewRecycleBin"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:text="Bin"
+                            android:textSize="13sp"
+                            app:cornerRadius="8dp"
+                            app:strokeColor="@color/stroke_subtle"
+                            app:layout_constraintEnd_toEndOf="parent"
+                            app:layout_constraintTop_toTopOf="parent" />
+
+                        <TextView
+                            android:id="@+id/recycleBinBadge"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:gravity="center"
+                            android:textSize="10sp"
+                            android:textColor="#FFFFFF"
+                            android:background="@drawable/badge_count_red"
+                            android:visibility="gone"
+                            android:elevation="4dp"
+                            app:layout_constraintTop_toTopOf="@+id/btnViewRecycleBin"
+                            app:layout_constraintEnd_toEndOf="@+id/btnViewRecycleBin"
+                            android:layout_marginTop="-6dp"
+                            android:layout_marginEnd="-6dp" />
+
+                    </androidx.constraintlayout.widget.ConstraintLayout>
+
+                    <!-- AI progress -->
+                    <com.google.android.material.progressindicator.LinearProgressIndicator
+                        android:id="@+id/aiProgressBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:visibility="gone"
+                        app:indicatorColor="@color/accent_blue"
+                        app:trackColor="@color/surface_elevated" />
+
+                    <TextView
+                        android:id="@+id/aiStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ── Clusters Section ── -->
+            <LinearLayout
+                android:id="@+id/clusterSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="10dp"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/clusterCount"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Clusters"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:fontFamily="sans-serif-medium" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSelectDuplicates"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:text="Select duplicates"
+                        android:textSize="12sp"
+                        app:cornerRadius="6dp" />
+
+                </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerClusters"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+            </LinearLayout>
+
+            <!-- ── Blurry Images Section ── -->
+            <LinearLayout
+                android:id="@+id/blurrySection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="8dp"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/blurryCount"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Blurry images"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:fontFamily="sans-serif-medium" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSelectAllBlurry"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:text="Select all"
+                        android:textSize="12sp"
+                        app:cornerRadius="6dp" />
+
+                </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerBlurry"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- ── Floating Selection Bar ── -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/selectionBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_margin="12dp"
+        app:cardBackgroundColor="@color/surface_elevated"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="8dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/selectedCount"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:fontFamily="sans-serif-medium" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMoveToRecycleBin"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:text="Move to Bin"
+                android:textSize="13sp"
+                app:cornerRadius="8dp"
+                app:backgroundTint="@color/danger_red" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

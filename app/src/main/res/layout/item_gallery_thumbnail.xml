@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_margin="1.5dp">
+
+    <!-- Thumbnail image -->
+    <ImageView
+        android:id="@+id/thumbnail"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:background="@color/surface_elevated" />
+
+    <!-- Dark overlay (shows when badges are visible) -->
+    <View
+        android:id="@+id/overlay"
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/gradient_bottom_overlay"
+        android:visibility="gone" />
+
+    <!-- Best Shot badge -->
+    <TextView
+        android:id="@+id/badgeBestShot"
+        android:layout_width="wrap_content"
+        android:layout_height="18dp"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="4dp"
+        android:paddingHorizontal="6dp"
+        android:text="★"
+        android:textColor="#FFFFFF"
+        android:textSize="10sp"
+        android:background="@drawable/badge_best_shot"
+        android:gravity="center"
+        android:visibility="gone" />
+
+    <!-- Blurry badge -->
+    <TextView
+        android:id="@+id/badgeBlurry"
+        android:layout_width="wrap_content"
+        android:layout_height="18dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="4dp"
+        android:paddingHorizontal="6dp"
+        android:text="blur"
+        android:textColor="#FFFFFF"
+        android:textSize="9sp"
+        android:background="@drawable/badge_blurry"
+        android:gravity="center"
+        android:visibility="gone" />
+
+</FrameLayout>

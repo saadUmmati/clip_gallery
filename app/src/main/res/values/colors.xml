@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background layers -->
+    <color name="background_primary">#0F0F0F</color>
+    <color name="surface_dark">#1A1A1A</color>
+    <color name="surface_elevated">#242424</color>
+    <color name="surface_card">#1E1E1E</color>
+
+    <!-- Text -->
+    <color name="text_primary">#F0F0F0</color>
+    <color name="text_secondary">#9A9A9A</color>
+    <color name="text_tertiary">#5A5A5A</color>
+
+    <!-- Accents -->
+    <color name="accent_blue">#4A9EFF</color>
+    <color name="accent_blue_dark">#2D7FE0</color>
+    <color name="accent_green">#3DCC8E</color>
+    <color name="accent_amber">#F5A623</color>
+    <color name="danger_red">#E05252</color>
+
+    <!-- Strokes / dividers -->
+    <color name="stroke_subtle">#2A2A2A</color>
+    <color name="stroke_medium">#383838</color>
+    <color name="ripple_color">#1AFFFFFF</color>
+
+    <!-- Badge colors -->
+    <color name="badge_best_shot">#B38F2E</color>
+    <color name="badge_blurry_bg">#99000000</color>
+
+    <!-- Tab tints -->
+    <color name="tab_icon_tint_selected">#4A9EFF</color>
+    <color name="tab_icon_tint_unselected">#5A5A5A</color>
+
+    <!-- Material theme required -->
+    <color name="colorPrimary">#4A9EFF</color>
+    <color name="colorPrimaryVariant">#2D7FE0</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+    <color name="colorSecondary">#3DCC8E</color>
+    <color name="colorOnSecondary">#FFFFFF</color>
+    <color name="colorSurface">#1A1A1A</color>
+    <color name="colorOnSurface">#F0F0F0</color>
+    <color name="colorBackground">#0F0F0F</color>
+    <color name="colorOnBackground">#F0F0F0</color>
+    <color name="colorError">#E05252</color>
+    <color name="colorOnError">#FFFFFF</color>
+</resources>

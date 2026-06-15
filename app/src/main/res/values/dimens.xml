@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Grid -->
+    <dimen name="grid_thumbnail_margin">1.5dp</dimen>
+    <dimen name="grid_columns">3</dimen>
+
+    <!-- Cards -->
+    <dimen name="card_margin_horizontal">12dp</dimen>
+    <dimen name="card_margin_vertical">6dp</dimen>
+    <dimen name="card_padding">16dp</dimen>
+    <dimen name="card_corner_radius">10dp</dimen>
+    <dimen name="card_corner_radius_large">12dp</dimen>
+
+    <!-- Spacing -->
+    <dimen name="spacing_xs">4dp</dimen>
+    <dimen name="spacing_sm">8dp</dimen>
+    <dimen name="spacing_md">12dp</dimen>
+    <dimen name="spacing_lg">16dp</dimen>
+    <dimen name="spacing_xl">24dp</dimen>
+
+    <!-- Badges -->
+    <dimen name="badge_height">18dp</dimen>
+    <dimen name="badge_corner_radius">4dp</dimen>
+
+    <!-- Toolbar -->
+    <dimen name="toolbar_height">56dp</dimen>
+
+    <!-- Selection bar -->
+    <dimen name="selection_bar_height">56dp</dimen>
+</resources>

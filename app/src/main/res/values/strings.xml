@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ClipGallery</string>
+
+    <!-- Tab labels -->
+    <string name="tab_gallery">Gallery</string>
+    <string name="tab_optimize">Optimize</string>
+
+    <!-- Permissions -->
+    <string name="permission_storage_rationale">Storage permission is needed to scan your photos</string>
+    <string name="permission_grant">Grant Access</string>
+
+    <!-- Gallery -->
+    <string name="gallery_empty_title">No photos found</string>
+    <string name="gallery_empty_subtitle">Grant storage access to view your gallery</string>
+    <string name="photo_count">%d photos</string>
+
+    <!-- Optimize -->
+    <string name="run_ai_analysis">Run AI Analysis</string>
+    <string name="ai_running">Analyzing photos…</string>
+    <string name="clusters_found">%d clusters found</string>
+    <string name="blurry_images">%d blurry images</string>
+    <string name="reclaimable_size">~%s reclaimable</string>
+    <string name="select_all_blurry">Select all blurry</string>
+    <string name="select_duplicates">Select duplicates</string>
+    <string name="move_to_bin">Move to Bin</string>
+    <string name="recycle_bin">Recycle Bin</string>
+    <string name="selected_count">%d selected</string>
+
+    <!-- Deletion -->
+    <string name="confirm_move_title">Move to Recycle Bin?</string>
+    <string name="confirm_move_message">%d image(s) will be moved to the recycle bin and permanently deleted after 30 days.</string>
+    <string name="move_confirm">Move</string>
+    <string name="undo">UNDO</string>
+    <string name="moved_to_bin">%d photo(s) moved to recycle bin</string>
+
+    <!-- Cluster detail -->
+    <string name="best_shot_label">★ Best Shot</string>
+    <string name="all_photos_in_cluster">All photos in this cluster</string>
+
+    <!-- Errors -->
+    <string name="error_scan_failed">Scan failed. Please try again.</string>
+    <string name="error_ai_failed">AI analysis failed: %s</string>
+    <string name="error_delete_failed">Could not delete selected files</string>
+</resources>
