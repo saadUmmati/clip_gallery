@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.recyclerview.widget.GridLayoutManager
+import com.example.gallery.app.R
 import com.example.gallery.app.databinding.FragmentGalleryBinding
 import com.example.gallery.app.ui.viewer.FullscreenViewerActivity
 import com.example.gallery.app.viewmodel.GalleryViewModel
@@ -61,7 +62,7 @@ class GalleryFragment : Fragment() {
         }
 
         viewModel.totalCount.observe(viewLifecycleOwner) { count ->
-            binding.photoCount.text = "$count photos"
+            binding.photoCount.text = getString(R.string.photo_count, count)
         }
     }
 

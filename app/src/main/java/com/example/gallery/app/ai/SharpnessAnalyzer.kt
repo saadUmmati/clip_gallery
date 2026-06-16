@@ -33,7 +33,11 @@ class SharpnessAnalyzer @Inject constructor(
      */
     fun computeSharpness(uri: String): Float {
         val bitmap = loadSampledBitmap(uri) ?: return 0f
-        return laplacianVariance(bitmap)
+        return try {
+            laplacianVariance(bitmap)
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun loadSampledBitmap(uri: String): Bitmap? {

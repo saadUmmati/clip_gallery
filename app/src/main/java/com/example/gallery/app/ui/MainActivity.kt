@@ -35,8 +35,18 @@ class MainActivity : AppCompatActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        val granted = results.values.all { it }
-        if (granted) {
+        // On Android 14+, we can proceed if we have either full or partial access
+        val isFullGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            results[Manifest.permission.READ_MEDIA_IMAGES] == true
+        } else {
+            results[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        }
+
+        val isPartialGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            results[Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED] == true
+        } else false
+
+        if (isFullGranted || isPartialGranted) {
             triggerScan()
         } else {
             showPermissionRationale()
@@ -63,12 +73,12 @@ class MainActivity : AppCompatActivity() {
     private fun setupTabs() {
         val adapter = MainPagerAdapter(this)
         binding.viewPager.adapter = adapter
-        binding.viewPager.offscreenPageLimit = 2
+        binding.viewPager.offscreenPageLimit = 1
 
         TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
             tab.text = when (position) {
-                0 -> "Gallery"
-                1 -> "Optimize"
+                0 -> getString(R.string.tab_gallery)
+                1 -> getString(R.string.tab_optimize)
                 else -> ""
             }
             tab.setIcon(when (position) {
@@ -91,13 +101,14 @@ class MainActivity : AppCompatActivity() {
                         if (state.count > 0) {
                             Snackbar.make(
                                 binding.root,
-                                "Found ${state.count} photos",
+                                getString(R.string.photo_count, state.count),
                                 Snackbar.LENGTH_SHORT
                             ).show()
                         }
                     }
                     is GalleryViewModel.ScanState.Error -> {
                         binding.progressBar.visibility = View.GONE
+                        Snackbar.make(binding.root, state.message, Snackbar.LENGTH_LONG).show()
                     }
                     else -> binding.progressBar.visibility = View.GONE
                 }
@@ -106,17 +117,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsAndScan() {
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
-        } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        val permissions = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
+                arrayOf(
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+                )
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+            }
+            else -> {
+                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
         }
 
-        val allGranted = permissions.all {
+        val hasAccess = permissions.any {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
 
-        if (allGranted) {
+        if (hasAccess) {
             triggerScan()
         } else {
             permissionLauncher.launch(permissions)
@@ -130,9 +150,9 @@ class MainActivity : AppCompatActivity() {
     private fun showPermissionRationale() {
         Snackbar.make(
             binding.root,
-            "Storage permission is required to view your photos",
+            getString(R.string.permission_storage_rationale),
             Snackbar.LENGTH_INDEFINITE
-        ).setAction("Grant") {
+        ).setAction(getString(R.string.permission_grant)) {
             checkPermissionsAndScan()
         }.show()
     }

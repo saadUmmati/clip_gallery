@@ -3,7 +3,7 @@
 -dontwarn ai.onnxruntime.**
 
 # Keep Room entities and DAOs
--keep class com.clipgallery.app.data.db.** { *; }
+-keep class com.example.gallery.app.data.db.** { *; }
 -keepclassmembers class * {
     @androidx.room.* <methods>;
 }
@@ -31,7 +31,10 @@
 -keep class * extends com.bumptech.glide.module.AppGlideModule { *; }
 -keep public enum com.bumptech.glide.load.ImageHeaderParser$** { *; }
 
-# WorkManager
--keep class * extends androidx.work.Worker { *; }
--keep class * extends androidx.work.CoroutineWorker { *; }
--keep class * extends androidx.work.ListenableWorker { *; }
+# Keep WorkManager and Hilt Workers
+-keep class * extends androidx.work.ListenableWorker {
+    <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+-keep class com.example.gallery.app.worker.** { *; }
+
+# Keep Hilt generated classes

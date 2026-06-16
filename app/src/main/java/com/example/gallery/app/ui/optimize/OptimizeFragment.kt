@@ -36,12 +36,16 @@ class OptimizeFragment : Fragment() {
     private lateinit var clusterAdapter: ClusterListAdapter
     private lateinit var blurryAdapter: BlurryImagesAdapter
 
+    private var pendingDeletionUris: List<String> = emptyList()
+
     private val deleteRequestLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        // User confirmed system deletion dialog
-        lifecycleScope.launch {
-            // Confirmation handled in repository
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            lifecycleScope.launch {
+                optimizeViewModel.confirmDeletion(pendingDeletionUris)
+                pendingDeletionUris = emptyList()
+            }
         }
     }
 
@@ -97,14 +101,14 @@ class OptimizeFragment : Fragment() {
 
         binding.btnSelectDuplicates.setOnClickListener {
             val clusters = optimizeViewModel.allClusters.value ?: return@setOnClickListener
-            val media = optimizeViewModel.blurryImages.value ?: return@setOnClickListener
-            optimizeViewModel.selectDuplicates(clusters, media)
+            val allMedia = optimizeViewModel.allMedia.value ?: return@setOnClickListener
+            optimizeViewModel.selectDuplicates(clusters, allMedia)
         }
 
         binding.btnMoveToRecycleBin.setOnClickListener {
             val selected = optimizeViewModel.selectedUris.value
             if (selected.isEmpty()) {
-                Snackbar.make(binding.root, "No images selected", Snackbar.LENGTH_SHORT).show()
+                Snackbar.make(binding.root, getString(R.string.no_images_selected), Snackbar.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             showConfirmDialog(selected.size)
@@ -117,34 +121,34 @@ class OptimizeFragment : Fragment() {
 
     private fun showConfirmDialog(count: Int) {
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Move to Recycle Bin")
-            .setMessage("Move $count image${if (count > 1) "s" else ""} to recycle bin?\nThey will be permanently deleted after 30 days.")
-            .setPositiveButton("Move") { _, _ ->
+            .setTitle(getString(R.string.confirm_move_title))
+            .setMessage(getString(R.string.confirm_move_message, count))
+            .setPositiveButton(getString(R.string.move_confirm)) { _, _ ->
                 val allMedia = optimizeViewModel.blurryImages.value ?: emptyList()
                 optimizeViewModel.moveSelectedToRecycleBin(allMedia)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.cancel), null)
             .show()
     }
 
     private fun observeViewModel() {
         optimizeViewModel.allClusters.observe(viewLifecycleOwner) { clusters ->
             clusterAdapter.submitList(clusters)
-            binding.clusterCount.text = "${clusters.size} clusters found"
+            binding.clusterCount.text = getString(R.string.clusters_found_count, clusters.size)
             binding.clusterSection.visibility =
                 if (clusters.isEmpty()) View.GONE else View.VISIBLE
         }
 
         optimizeViewModel.blurryImages.observe(viewLifecycleOwner) { items ->
             blurryAdapter.submitList(items)
-            binding.blurryCount.text = "${items.size} blurry images"
+            binding.blurryCount.text = getString(R.string.blurry_images, items.size)
             binding.blurrySection.visibility =
                 if (items.isEmpty()) View.GONE else View.VISIBLE
         }
 
         optimizeViewModel.reclaimableSize.observe(viewLifecycleOwner) { size ->
             size?.let {
-                binding.reclaimableSize.text = "~${formatFileSize(it)} reclaimable"
+                binding.reclaimableSize.text = getString(R.string.reclaimable_size, formatFileSize(it))
             }
         }
 
@@ -168,8 +172,9 @@ class OptimizeFragment : Fragment() {
             optimizeViewModel.selectedUris.collectLatest { selected ->
                 val count = selected.size
                 binding.selectionBar.visibility = if (count > 0) View.VISIBLE else View.GONE
-                binding.selectedCount.text = "$count selected"
+                binding.selectedCount.text = getString(R.string.selected_count, count)
                 binding.btnMoveToRecycleBin.isEnabled = count > 0
+                blurryAdapter.updateSelections(selected)
             }
         }
 
@@ -183,12 +188,12 @@ class OptimizeFragment : Fragment() {
                     }
                     is AIViewModel.AiState.Done -> {
                         binding.aiProgressBar.visibility = View.GONE
-                        binding.aiStatusText.text = "Found ${state.clusters} clusters"
+                        binding.aiStatusText.text = getString(R.string.clusters_found_count, state.clusters)
                         binding.btnRunAi.isEnabled = true
                     }
                     is AIViewModel.AiState.Error -> {
                         binding.aiProgressBar.visibility = View.GONE
-                        binding.aiStatusText.text = "AI error: ${state.message}"
+                        binding.aiStatusText.text = getString(R.string.ai_error_prefix, state.message)
                         binding.btnRunAi.isEnabled = true
                     }
                     else -> {
@@ -203,9 +208,9 @@ class OptimizeFragment : Fragment() {
     private fun showUndoSnackbar(uris: List<String>) {
         Snackbar.make(
             binding.root,
-            "${uris.size} photo${if (uris.size > 1) "s" else ""} moved to recycle bin",
+            getString(R.string.moved_to_bin, uris.size),
             5000 // 5 seconds
-        ).setAction("UNDO") {
+        ).setAction(getString(R.string.undo)) {
             optimizeViewModel.undoRecycleBin(uris)
         }.addCallback(object : Snackbar.Callback() {
             override fun onDismissed(snackbar: Snackbar, event: Int) {

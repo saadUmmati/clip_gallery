@@ -38,20 +38,34 @@ class OnnxEmbedder @Inject constructor(
     }
 
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
+
+    @Volatile
     private var session: OrtSession? = null
 
     /**
      * Lazily initializes the ONNX session.
      * Call from a background thread — model loading is expensive.
+     * @throws FileNotFoundException if the ONNX model is missing from assets/
+     * @throws Exception if the model fails to load
      */
     fun initialize() {
         if (session != null) return
-        val modelBytes = context.assets.open(MODEL_FILE).readBytes()
-        val options = OrtSession.SessionOptions().apply {
-            setIntraOpNumThreads(4)
-            addConfigEntry("session.intra_op.allow_spinning", "0")
+        synchronized(this) {
+            if (session != null) return
+            val modelBytes = try {
+                context.assets.open(MODEL_FILE).readBytes()
+            } catch (e: java.io.FileNotFoundException) {
+                throw IllegalStateException(
+                    "ONNX model '$MODEL_FILE' not found in assets/. " +
+                    "Please place the model file at app/src/main/assets/$MODEL_FILE", e
+                )
+            }
+            val options = OrtSession.SessionOptions().apply {
+                setIntraOpNumThreads(4)
+                addConfigEntry("session.intra_op.allow_spinning", "0")
+            }
+            session = env.createSession(modelBytes, options)
         }
-        session = env.createSession(modelBytes, options)
     }
 
     /**
@@ -59,9 +73,13 @@ class OnnxEmbedder @Inject constructor(
      * Returns null if the image cannot be decoded or inference fails.
      */
     fun embed(uri: String): FloatArray? {
-        val sess = session ?: run { initialize(); session ?: return null }
+        val sess = session ?: run {
+            initialize()
+            session ?: return null
+        }
         val bitmap = loadAndResizeBitmap(uri) ?: return null
         val inputTensor = bitmapToTensor(bitmap)
+        bitmap.recycle()
 
         return try {
             val inputMap = mapOf("input" to inputTensor)
@@ -97,7 +115,9 @@ class OnnxEmbedder @Inject constructor(
             val decodeOptions = BitmapFactory.Options().apply { this.inSampleSize = inSampleSize }
             val decoded = openStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
             decoded?.let {
-                Bitmap.createScaledBitmap(it, IMAGE_SIZE, IMAGE_SIZE, true)
+                val scaled = Bitmap.createScaledBitmap(it, IMAGE_SIZE, IMAGE_SIZE, true)
+                if (scaled != it) it.recycle()
+                scaled
             }
         } catch (e: Exception) { null }
     }

@@ -10,7 +10,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.clipgallery.app"
+        applicationId = "com.example.gallery.app"
         minSdk = 23
         targetSdk = 34
         versionCode = 1
@@ -72,10 +72,6 @@ dependencies {
     implementation(libs.androidx.activity.ktx)
     implementation("androidx.fragment:fragment-ktx:1.8.0")
 
-    // Navigation
-    implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
-    implementation("androidx.navigation:navigation-ui-ktx:2.7.7")
-
     // ViewPager2 + TabLayout
     implementation("androidx.viewpager2:viewpager2:1.1.0")
 
@@ -109,11 +105,14 @@ dependencies {
     implementation(libs.androidx.hilt.work)
     ksp("androidx.hilt:hilt-compiler:1.2.0")
 
+
     // Splash Screen API
     implementation("androidx.core:core-splashscreen:1.0.1")
 
     // Tests
     testImplementation(libs.junit)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("io.mockk:mockk:1.13.10")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }

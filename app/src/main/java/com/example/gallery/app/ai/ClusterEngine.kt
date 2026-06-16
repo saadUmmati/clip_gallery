@@ -47,6 +47,21 @@ class ClusterEngine @Inject constructor() {
         val uris = embeddings.keys.toList()
         val n = uris.size
 
+        // Guard against excessive memory usage for very large sets
+        if (n > 10000) {
+            // For very large sets, return each image as its own cluster
+            // to avoid O(n^2) memory and compute issues
+            return uris.mapIndexed { idx, uri ->
+                val blurryUris = if ((sharpness[uri] ?: Float.MAX_VALUE) < BLUR_THRESHOLD) listOf(uri) else emptyList()
+                ClusterResult(
+                    clusterId = idx,
+                    memberUris = listOf(uri),
+                    bestShotUri = uri,
+                    blurryUris = blurryUris
+                )
+            }
+        }
+
         // Union-Find structure for cluster assignment
         val parent = IntArray(n) { it }
 

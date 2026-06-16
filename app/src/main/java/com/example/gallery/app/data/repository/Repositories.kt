@@ -59,6 +59,8 @@ class MediaRepository @Inject constructor(
     ) = mediaItemDao.updateAiResults(uri, clusterId, isBestShot, isBlurry, score)
 
     suspend fun markProcessed(uri: String) = mediaItemDao.markProcessed(uri)
+
+    suspend fun purgeExpiredRecycleBin(cutoff: Long) = mediaItemDao.purgeExpiredRecycleBin(cutoff)
 }
 
 @Singleton
@@ -162,6 +164,7 @@ class DeletionRepository @Inject constructor(
     /**
      * Purges items that have been in recycle bin for 30+ days.
      * Called by RecycleBinPurgeWorker.
+     * DB records are cleaned up in confirmDeletion() after user confirms file deletion.
      */
     suspend fun purgeExpiredItems(
         launcher: ActivityResultLauncher<IntentSenderRequest>?
@@ -170,8 +173,6 @@ class DeletionRepository @Inject constructor(
         if (expired.isNotEmpty()) {
             requestPermanentDeletion(expired.map { it.uri }, launcher)
         }
-        recycleBinDao.purgeExpired()
-        mediaItemDao.purgeExpiredRecycleBin(System.currentTimeMillis())
     }
 
     /**

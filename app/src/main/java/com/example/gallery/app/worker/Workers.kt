@@ -41,9 +41,11 @@ class MediaScanWorker @AssistedInject constructor(
         return try {
             setProgress(workDataOf("status" to "Scanning media…"))
             val count = mediaRepository.scanAndStore()
+            android.util.Log.d("MediaScanWorker", "Scan completed: $count images found")
             Result.success(workDataOf(KEY_SCANNED_COUNT to count))
         } catch (e: Exception) {
-            Result.failure(workDataOf("error" to e.message))
+            android.util.Log.e("MediaScanWorker", "Scan failed", e)
+            Result.failure(workDataOf("error" to (e.message ?: "Unknown scan error")))
         }
     }
 }
@@ -80,7 +82,11 @@ class AiProcessingWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         return try {
             setProgress(workDataOf("status" to "Initializing AI model…"))
-            embedder.initialize()
+            try {
+                embedder.initialize()
+            } catch (e: IllegalStateException) {
+                return Result.failure(workDataOf("error" to e.message))
+            }
 
             val allEmbeddings = mutableMapOf<String, FloatArray>()
             val allSharpness  = mutableMapOf<String, Float>()
@@ -148,7 +154,8 @@ class AiProcessingWorker @AssistedInject constructor(
 class RecycleBinPurgeWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
-    private val mediaRepository: MediaRepository
+    private val mediaRepository: MediaRepository,
+    private val recycleBinDao: com.example.gallery.app.data.db.dao.RecycleBinDao
 ) : CoroutineWorker(context, params) {
 
     companion object {
@@ -168,11 +175,10 @@ class RecycleBinPurgeWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
-            // Purge expired recycle bin entries from DB
-            // (Permanent file deletion is triggered from UI with user approval)
             val cutoff = System.currentTimeMillis()
-            // Just flag expired items — actual deletion requires user consent on API 30+
-            Result.success()
+            recycleBinDao.purgeExpired(cutoff)
+            mediaRepository.purgeExpiredRecycleBin(cutoff)
+            Result.success(workDataOf("purged" to true))
         } catch (e: Exception) {
             Result.failure(workDataOf("error" to e.message))
         }

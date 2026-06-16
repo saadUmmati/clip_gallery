@@ -19,9 +19,16 @@ class BlurryImagesAdapter(
     private val selectedUris = mutableSetOf<String>()
 
     fun updateSelections(uris: Set<String>) {
+        val old = selectedUris.toSet()
         selectedUris.clear()
         selectedUris.addAll(uris)
-        notifyDataSetChanged()
+        currentList.forEachIndexed { index, item ->
+            val wasSelected = item.uri in old
+            val isSelected = item.uri in uris
+            if (wasSelected != isSelected) {
+                notifyItemChanged(index)
+            }
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {

@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_MEDIA" />
@@ -43,6 +44,14 @@
             android:exported="false"
             android:theme="@style/Theme.ClipGallery.Fullscreen" />
 
+        <receiver
+            android:name=".util.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- WorkManager: disable default initializer (provided by ClipGalleryApp) -->
         <provider
             android:name="androidx.startup.InitializationProvider"
@@ -52,7 +61,7 @@
             <meta-data
                 android:name="androidx.work.impl.WorkManagerInitializer"
                 android:value="androidx.startup"
-                tools:node="remove" />
+                tools:node="remove" />   <!-- ← this line is critical -->
         </provider>
 
 

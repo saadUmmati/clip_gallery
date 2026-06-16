@@ -16,9 +16,9 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// ─────────────────────────────────────────────────────────
-// GalleryViewModel — Tab 1: media grid
-// ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────\\
+//          GalleryViewModel — Tab 1: media grid
+// ─────────────────────────────────────────────────────────\\
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
     private val mediaRepository: MediaRepository
@@ -40,11 +40,13 @@ class GalleryViewModel @Inject constructor(
         workManager.enqueue(request)
         viewModelScope.launch {
             workManager.getWorkInfoByIdFlow(request.id).collect { info ->
-                if (info?.state?.isFinished == true) {
-                    _scanState.value = if (info.state.name == "SUCCEEDED")
+                if (info != null && info.state.isFinished) {
+                    _scanState.value = if (info.state == androidx.work.WorkInfo.State.SUCCEEDED) {
                         ScanState.Done(info.outputData.getInt(MediaScanWorker.KEY_SCANNED_COUNT, 0))
-                    else
-                        ScanState.Error("Scan failed")
+                    } else {
+                        val errorMsg = info.outputData.getString("error") ?: "Scan failed"
+                        ScanState.Error(errorMsg)
+                    }
                 }
             }
         }
@@ -70,6 +72,9 @@ class OptimizeViewModel @Inject constructor(
 
     val allClusters: LiveData<List<ClusterEntity>> =
         clusterRepository.getAllClusters().asLiveData()
+
+    val allMedia: LiveData<List<MediaItemEntity>> =
+        mediaRepository.getAllMedia().asLiveData()
 
     val blurryImages: LiveData<List<MediaItemEntity>> =
         mediaRepository.getBlurryImages().asLiveData()
@@ -149,6 +154,10 @@ class OptimizeViewModel @Inject constructor(
 
     fun confirmUndoExpired() {
         _deleteState.value = DeleteState.Idle
+    }
+
+    suspend fun confirmDeletion(uris: List<String>) {
+        deletionRepository.confirmDeletion(uris)
     }
 
     sealed class DeleteState {

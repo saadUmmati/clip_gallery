@@ -31,6 +31,7 @@
     <string name="confirm_move_title">Move to Recycle Bin?</string>
     <string name="confirm_move_message">%d image(s) will be moved to the recycle bin and permanently deleted after 30 days.</string>
     <string name="move_confirm">Move</string>
+    <string name="cancel">Cancel</string>
     <string name="undo">UNDO</string>
     <string name="moved_to_bin">%d photo(s) moved to recycle bin</string>
 
@@ -42,4 +43,7 @@
     <string name="error_scan_failed">Scan failed. Please try again.</string>
     <string name="error_ai_failed">AI analysis failed: %s</string>
     <string name="error_delete_failed">Could not delete selected files</string>
+    <string name="no_images_selected">No images selected</string>
+    <string name="ai_error_prefix">AI error: %s</string>
+    <string name="clusters_found_count">%d clusters found</string>
 </resources>

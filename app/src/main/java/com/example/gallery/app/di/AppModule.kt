@@ -27,7 +27,6 @@ object AppModule {
             ClipGalleryDatabase::class.java,
             "clipgallery.db"
         )
-            .fallbackToDestructiveMigration()
             .build()
     }
 
