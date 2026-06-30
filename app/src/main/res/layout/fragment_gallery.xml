@@ -10,17 +10,24 @@
     <LinearLayout
         android:id="@+id/headerBar"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
-        android:orientation="horizontal"
-        android:paddingHorizontal="16dp"
-        android:gravity="center_vertical"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
         android:background="@color/surface_dark">
+
+        <com.google.android.material.search.SearchBar
+            android:id="@+id/searchBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginVertical="8dp"
+            android:hint="@string/search_hint" />
 
         <TextView
             android:id="@+id/photoCount"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:paddingHorizontal="16dp"
+            android:paddingBottom="8dp"
             android:text="0 photos"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
@@ -32,10 +39,35 @@
         android:id="@+id/recyclerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="44dp"
+        android:layout_marginTop="105dp"
         android:scrollbars="vertical"
         android:clipToPadding="false"
         android:padding="2dp" />
+
+    <!-- Timeline view (hidden by default) -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/timelineRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="105dp"
+        android:scrollbars="vertical"
+        android:clipToPadding="false"
+        android:padding="2dp"
+        android:visibility="gone" />
+
+    <!-- View toggle button -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabToggleView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="110dp"
+        android:layout_marginEnd="12dp"
+        android:src="@drawable/ic_timeline"
+        android:contentDescription="@string/toggle_view"
+        app:fabSize="mini"
+        app:backgroundTint="@color/surface_elevated"
+        app:tint="@color/text_primary" />
 
     <!-- Empty state -->
     <LinearLayout
@@ -51,13 +83,14 @@
             android:layout_height="72dp"
             android:src="@drawable/ic_gallery"
             android:alpha="0.3"
-            android:tint="@color/text_secondary" />
+            app:tint="@color/text_secondary"
+            android:contentDescription="@null" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="No photos found"
+            android:text="@string/gallery_empty_title"
             android:textColor="@color/text_secondary"
             android:textSize="16sp" />
 
@@ -65,10 +98,54 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Grant storage permission to see your gallery"
+            android:text="@string/gallery_empty_subtitle"
             android:textColor="@color/text_tertiary"
             android:textSize="13sp" />
 
     </LinearLayout>
+
+    <com.google.android.material.search.SearchView
+        android:id="@+id/searchView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:hint="@string/search_hint"
+        app:layout_anchor="@id/searchBar">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/searchResultRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </com.google.android.material.search.SearchView>
+
+    <!-- Send to AI FAB (visible in selection mode) -->
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/fabSendToAi"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="80dp"
+        android:text="@string/send_to_ai"
+        android:textColor="@color/text_primary"
+        android:visibility="gone"
+        app:icon="@drawable/ic_ai"
+        app:backgroundTint="@color/accent_blue"
+        app:iconTint="@color/text_primary" />
+
+    <!-- Move to Vault FAB (visible in selection mode) -->
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/fabMoveToVault"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:text="@string/vault_move_to"
+        android:textColor="@color/text_primary"
+        android:visibility="gone"
+        app:icon="@drawable/ic_vault"
+        app:backgroundTint="@color/accent_blue"
+        app:iconTint="@color/text_primary" />
 
 </FrameLayout>

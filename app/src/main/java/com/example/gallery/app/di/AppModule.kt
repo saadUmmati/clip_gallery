@@ -3,7 +3,6 @@ package com.example.gallery.app.di
 
 import android.content.Context
 import androidx.room.Room
-import androidx.work.WorkManager
 import com.example.gallery.app.data.db.ClipGalleryDatabase
 import com.example.gallery.app.data.db.dao.ClusterDao
 import com.example.gallery.app.data.db.dao.MediaItemDao
@@ -27,6 +26,10 @@ object AppModule {
             ClipGalleryDatabase::class.java,
             "clipgallery.db"
         )
+            .addMigrations(
+                ClipGalleryDatabase.MIGRATION_1_2,
+                ClipGalleryDatabase.MIGRATION_2_3
+            )
             .build()
     }
 

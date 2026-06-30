@@ -1,6 +1,7 @@
 package com.example.gallery.app.ui.cluster
 
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -19,6 +20,7 @@ import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.databinding.FragmentClusterDetailBinding
 import com.example.gallery.app.databinding.ItemClusterCardBinding
 import com.example.gallery.app.databinding.ItemGalleryThumbnailBinding
+import com.example.gallery.app.ui.viewer.FullscreenViewerActivity
 import com.example.gallery.app.viewmodel.ClusterDetailViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -103,7 +105,13 @@ class ClusterDetailFragment : Fragment() {
 
         val clusterId = arguments?.getInt(ARG_CLUSTER_ID) ?: return
 
-        adapter = ClusterMembersAdapter()
+        adapter = ClusterMembersAdapter { item ->
+            val intent = Intent(requireContext(), FullscreenViewerActivity::class.java).apply {
+                putExtra(FullscreenViewerActivity.EXTRA_URI, item.uri)
+                putExtra(FullscreenViewerActivity.EXTRA_CLUSTER_ID, clusterId)
+            }
+            startActivity(intent)
+        }
         binding.recyclerMembers.layoutManager = GridLayoutManager(requireContext(), 3)
         binding.recyclerMembers.adapter = adapter
 
@@ -115,7 +123,7 @@ class ClusterDetailFragment : Fragment() {
 
         viewModel.clusterMembers.observe(viewLifecycleOwner) { members ->
             adapter.submitList(members)
-            binding.toolbar.subtitle = "${members.size} photos"
+            binding.toolbar.subtitle = getString(R.string.photos_count, members.size)
 
             // Highlight best shot
             val bestShot = members.firstOrNull { it.isBestShot }
@@ -138,8 +146,9 @@ class ClusterDetailFragment : Fragment() {
 // ──────────────────────────────────────────────────
 // Adapter for cluster member grid
 // ──────────────────────────────────────────────────
-class ClusterMembersAdapter :
-    ListAdapter<MediaItemEntity, ClusterMembersAdapter.ViewHolder>(DiffCallback) {
+class ClusterMembersAdapter(
+    private val onItemClick: (MediaItemEntity) -> Unit = {}
+) : ListAdapter<MediaItemEntity, ClusterMembersAdapter.ViewHolder>(DiffCallback) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemGalleryThumbnailBinding.inflate(
@@ -168,6 +177,8 @@ class ClusterMembersAdapter :
             binding.badgeBlurry.visibility = if (item.isBlurry) View.VISIBLE else View.GONE
             binding.overlay.visibility =
                 if (item.isBlurry || item.isBestShot) View.VISIBLE else View.GONE
+
+            binding.root.setOnClickListener { onItemClick(item) }
         }
     }
 

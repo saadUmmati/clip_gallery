@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.gallery.app"
-        minSdk = 23
+        minSdk = 21
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -84,6 +84,7 @@ dependencies {
     // Room Database
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    implementation("androidx.room:room-paging:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
     // WorkManager (background jobs)
@@ -96,14 +97,35 @@ dependencies {
     implementation("com.github.bumptech.glide:glide:4.16.0")
     ksp("com.github.bumptech.glide:compiler:4.16.0")
 
+    // PhotoView (pinch-to-zoom)
+    implementation("io.getstream:photoview:1.0.1")
+
+    // SubsamplingScaleImageView (tiled rendering for massive images)
+    implementation("com.davemorrissey.labs:subsampling-scale-image-view:3.10.0")
+
+    // EXIF metadata parsing
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // Biometric authentication
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
+
+    // EncryptedSharedPreferences + security crypto
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // RecyclerView
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+
+    // Paging 3
+    implementation("androidx.paging:paging-runtime-ktx:3.3.0")
+    implementation("androidx.paging:paging-compose:3.3.0")
 
     // Hilt (DI)
     implementation("com.google.dagger:hilt-android:2.51.1")
     ksp("com.google.dagger:hilt-compiler:2.51.1")
     implementation(libs.androidx.hilt.work)
     ksp("androidx.hilt:hilt-compiler:1.2.0")
+
+
 
 
     // Splash Screen API

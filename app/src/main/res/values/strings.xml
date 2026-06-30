@@ -14,6 +14,10 @@
     <string name="gallery_empty_title">No photos found</string>
     <string name="gallery_empty_subtitle">Grant storage access to view your gallery</string>
     <string name="photo_count">%d photos</string>
+    <string name="select_image">Select image</string>
+    <string name="send_to_ai">Send to AI</string>
+    <string name="send_to_ai_count">Send %d to AI</string>
+    <string name="exit_selection">Exit selection</string>
 
     <!-- Optimize -->
     <string name="run_ai_analysis">Run AI Analysis</string>
@@ -46,4 +50,64 @@
     <string name="no_images_selected">No images selected</string>
     <string name="ai_error_prefix">AI error: %s</string>
     <string name="clusters_found_count">%d clusters found</string>
+
+    <!-- Recycle Bin -->
+    <string name="recycle_bin_title">Recycle Bin</string>
+    <string name="recycle_bin_subtitle">Items deleted after 30 days</string>
+    <string name="recycle_bin_empty">Recycle bin is empty</string>
+    <string name="action_restore_all">Restore All</string>
+    <string name="action_empty_bin">Empty Bin</string>
+    <string name="confirm_empty_title">Empty Recycle Bin?</string>
+    <string name="confirm_empty_message">This will permanently delete all items in the recycle bin. This action cannot be undone.</string>
+    <string name="empty_confirm">Empty</string>
+
+    <!-- Search -->
+    <string name="search_hint">Search photos…</string>
+    <string name="search_no_results">No results for \"%s\"</string>
+    <string name="toggle_view">Toggle view</string>
+    <string name="semantic_search_hint">Describe what you\'re looking for…</string>
+    <string name="searching">Searching…</string>
+    <string name="no_results">No results</string>
+
+    <!-- Cluster detail -->
+    <string name="cluster_label">Cluster</string>
+    <string name="photos_count">%d photos</string>
+    <string name="blurry_count">%d blurry</string>
+    <string name="storage_label">STORAGE</string>
+    <string name="bin_button">Bin</string>
+
+    <!-- Metadata bottom sheet -->
+    <string name="photo_details">Photo Details</string>
+    <string name="section_camera">CAMERA</string>
+    <string name="section_technical">TECHNICAL</string>
+    <string name="section_location">LOCATION</string>
+    <string name="meta_make">Make</string>
+    <string name="meta_model">Model</string>
+    <string name="meta_aperture">Aperture</string>
+    <string name="meta_iso">ISO</string>
+    <string name="meta_shutter">Shutter Speed</string>
+    <string name="meta_focal">Focal Length</string>
+    <string name="meta_resolution">Resolution</string>
+    <string name="meta_file_size">File Size</string>
+    <string name="meta_file_type">File Type</string>
+    <string name="meta_date_taken">Date Taken</string>
+    <string name="meta_file_path">File Path</string>
+    <string name="meta_coordinates">Coordinates</string>
+    <string name="no_location_data">No location data</string>
+
+    <!-- Vault -->
+    <string name="vault_title">Secure Vault</string>
+    <string name="vault_empty">No files in vault</string>
+    <string name="vault_empty_subtitle">Move sensitive photos here to encrypt and hide them</string>
+    <string name="vault_auth_title">Unlock Vault</string>
+    <string name="vault_auth_subtitle">Authenticate to access your secure vault</string>
+    <string name="vault_move_to">Move to Vault</string>
+    <string name="vault_restore">Restore to Gallery</string>
+    <string name="vault_delete">Delete Permanently</string>
+    <string name="vault_count">%d files</string>
+    <string name="vault_size">%s encrypted</string>
+    <string name="vault_selection_bar">%d selected</string>
+    <string name="confirm_vault_move">Move %d file(s) to the secure vault? Files will be encrypted with AES-256.</string>
+    <string name="confirm_vault_restore">Restore %d file(s) to the gallery? Files will be decrypted.</string>
+    <string name="confirm_vault_delete">Permanently delete %d file(s) from the vault? This cannot be undone.</string>
 </resources>

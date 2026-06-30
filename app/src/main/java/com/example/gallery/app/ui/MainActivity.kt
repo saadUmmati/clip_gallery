@@ -157,6 +157,10 @@ class MainActivity : AppCompatActivity() {
         }.show()
     }
 
+    fun switchToOptimizeTab() {
+        binding.viewPager.currentItem = 1
+    }
+
     inner class MainPagerAdapter(activity: AppCompatActivity) : FragmentStateAdapter(activity) {
         override fun getItemCount() = 2
         override fun createFragment(position: Int): Fragment = when (position) {

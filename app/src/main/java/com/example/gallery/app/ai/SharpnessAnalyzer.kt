@@ -24,7 +24,7 @@ class SharpnessAnalyzer @Inject constructor(
         // Laplacian kernel: [0,1,0,1,-4,1,0,1,0]
         private val LAPLACIAN = intArrayOf(0, 1, 0, 1, -4, 1, 0, 1, 0)
 
-        private const val SAMPLE_SIZE = 400   // Downscale for performance
+        private const val SAMPLE_SIZE = 200   // Downscale for performance — 200 is sufficient for Laplacian
     }
 
     /**
@@ -42,21 +42,17 @@ class SharpnessAnalyzer @Inject constructor(
 
     private fun loadSampledBitmap(uri: String): Bitmap? {
         return try {
-            val opts = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
-            val stream = openStream(uri) ?: return null
-            BitmapFactory.decodeStream(stream, null, opts)
-            stream.close()
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            openStream(uri)?.use { BitmapFactory.decodeStream(it, null, boundsOpts) }
 
-            val scale = maxOf(opts.outWidth, opts.outHeight) / SAMPLE_SIZE
-            val opts2 = BitmapFactory.Options().apply {
+            if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) return null
+
+            val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight)
+            val scale = maxDim / SAMPLE_SIZE
+            val decodeOpts = BitmapFactory.Options().apply {
                 inSampleSize = if (scale > 1) scale else 1
             }
-            val stream2 = openStream(uri) ?: return null
-            val bmp = BitmapFactory.decodeStream(stream2, null, opts2)
-            stream2.close()
-            bmp
+            openStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
         } catch (e: Exception) {
             null
         }

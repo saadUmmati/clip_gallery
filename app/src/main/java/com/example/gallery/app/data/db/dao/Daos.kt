@@ -1,17 +1,26 @@
 package com.example.gallery.app.data.db.dao
 
 import androidx.lifecycle.LiveData
+import androidx.paging.PagingSource
 import androidx.room.*
 import com.example.gallery.app.data.db.entities.ClusterEntity
+import com.example.gallery.app.data.db.entities.EmbeddingPair
 import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.data.db.entities.RecycleBinEntity
+import com.example.gallery.app.data.db.entities.TimelineItem
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MediaItemDao {
 
-    @Query("SELECT * FROM media_items WHERE isInRecycleBin = 0 ORDER BY dateAdded DESC")
+    @Query("SELECT * FROM media_items WHERE isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC")
     fun getAllMedia(): Flow<List<MediaItemEntity>>
+
+    @Query("SELECT * FROM media_items WHERE isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC")
+    fun getAllMediaPaging(): PagingSource<Int, MediaItemEntity>
+
+    @Query("SELECT * FROM media_items WHERE isInRecycleBin = 0 AND isInVault = 0 AND (fileName LIKE '%' || :query || '%' OR mimeType LIKE '%' || :query || '%') ORDER BY dateAdded DESC")
+    fun searchMediaPaging(query: String): PagingSource<Int, MediaItemEntity>
 
     @Query("SELECT * FROM media_items WHERE clusterId = :clusterId AND isInRecycleBin = 0")
     fun getMediaByCluster(clusterId: Int): Flow<List<MediaItemEntity>>
@@ -31,13 +40,13 @@ interface MediaItemDao {
     @Query("SELECT COUNT(*) FROM media_items WHERE isBlurry = 1 AND isInRecycleBin = 0")
     suspend fun getBlurryCount(): Int
 
-    @Query("SELECT SUM(sizeBytes) FROM media_items WHERE isInRecycleBin = 0")
+    @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM media_items WHERE isInRecycleBin = 0")
     fun getTotalSize(): LiveData<Long>
 
-    @Query("SELECT SUM(sizeBytes) FROM media_items WHERE (isBlurry = 1 OR (clusterId IS NOT NULL AND isBestShot = 0)) AND isInRecycleBin = 0")
-    suspend fun getReclaimableSize(): Long?
+    @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM media_items WHERE (isBlurry = 1 OR (clusterId IS NOT NULL AND isBestShot = 0)) AND isInRecycleBin = 0")
+    suspend fun getReclaimableSize(): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(items: List<MediaItemEntity>)
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -51,6 +60,12 @@ interface MediaItemDao {
 
     @Query("UPDATE media_items SET embeddingProcessed = 1 WHERE uri = :uri")
     suspend fun markProcessed(uri: String)
+
+    @Query("UPDATE media_items SET embedding = :embedding, embeddingProcessed = 1 WHERE uri = :uri")
+    suspend fun storeEmbedding(uri: String, embedding: ByteArray?)
+
+    @Query("SELECT embedding FROM media_items WHERE uri = :uri")
+    suspend fun getEmbedding(uri: String): ByteArray?
 
     @Query("UPDATE media_items SET isInRecycleBin = 1, recycleBinDate = :timestamp WHERE uri IN (:uris)")
     suspend fun moveToRecycleBin(uris: List<String>, timestamp: Long = System.currentTimeMillis())
@@ -66,6 +81,28 @@ interface MediaItemDao {
 
     @Query("SELECT * FROM media_items WHERE embeddingProcessed = 0 AND isInRecycleBin = 0 LIMIT :batchSize")
     suspend fun getUnprocessedBatch(batchSize: Int = 50): List<MediaItemEntity>
+
+    // Vault queries
+    @Query("SELECT * FROM media_items WHERE isInVault = 1 AND isInRecycleBin = 0 ORDER BY dateAdded DESC")
+    fun getAllVaultItems(): Flow<List<MediaItemEntity>>
+
+    @Query("UPDATE media_items SET isInVault = 1 WHERE uri IN (:uris)")
+    suspend fun moveToVault(uris: List<String>)
+
+    @Query("UPDATE media_items SET isInVault = 0 WHERE uri IN (:uris)")
+    suspend fun restoreFromVault(uris: List<String>)
+
+    @Query("SELECT COUNT(*) FROM media_items WHERE isInVault = 1")
+    fun getVaultCount(): LiveData<Int>
+
+    @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM media_items WHERE isInVault = 1")
+    fun getVaultSize(): LiveData<Long>
+
+    @Query("SELECT uri, embedding FROM media_items WHERE embeddingProcessed = 1 AND isInRecycleBin = 0 AND isInVault = 0 AND embedding IS NOT NULL")
+    suspend fun getAllProcessedEmbeddings(): List<EmbeddingPair>
+
+    @Query("SELECT uri, embedding, dateAdded FROM media_items WHERE embeddingProcessed = 1 AND isInRecycleBin = 0 AND isInVault = 0 AND embedding IS NOT NULL ORDER BY dateAdded DESC")
+    suspend fun getAllWithEmbeddingsForTimeline(): List<TimelineItem>
 }
 
 @Dao
@@ -91,6 +128,12 @@ interface ClusterDao {
 
     @Query("DELETE FROM clusters")
     suspend fun clearAll()
+
+    @Transaction
+    suspend fun replaceAll(clusters: List<ClusterEntity>) {
+        clearAll()
+        insertAll(clusters)
+    }
 
     @Query("UPDATE clusters SET memberCount = :count, blurryCount = :blurryCount WHERE id = :id")
     suspend fun updateCounts(id: Int, count: Int, blurryCount: Int)

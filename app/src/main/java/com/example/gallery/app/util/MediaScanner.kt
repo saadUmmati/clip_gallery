@@ -12,7 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "MediaScanner"
-private const val MIN_FILE_SIZE_BYTES = 1024L      // 1 KB - much more lenient
+private const val MIN_FILE_SIZE_BYTES = 15_360L    // 15 KB - filter sub-15KB system assets
 private const val MIN_DIMENSION_PX = 10            // 10px - much more lenient
 
 @Singleton
@@ -37,13 +37,14 @@ class MediaScanner @Inject constructor(
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.DATE_ADDED,
             MediaStore.Images.Media.SIZE,
+            MediaStore.Images.Media.MIME_TYPE,
             MediaStore.Images.Media.WIDTH,
-            MediaStore.Images.Media.HEIGHT,
-            MediaStore.Images.Media.MIME_TYPE
+            MediaStore.Images.Media.HEIGHT
         )
 
-        val selection = "${MediaStore.Images.Media.SIZE} >= ? AND ${MediaStore.Images.Media.WIDTH} >= ? AND ${MediaStore.Images.Media.HEIGHT} >= ?"
-        val selectionArgs = arrayOf(MIN_FILE_SIZE_BYTES.toString(), MIN_DIMENSION_PX.toString(), MIN_DIMENSION_PX.toString())
+        // Remove dimensions from selection to be more compatible with different devices/versions
+        val selection = "${MediaStore.Images.Media.SIZE} >= ?"
+        val selectionArgs = arrayOf(MIN_FILE_SIZE_BYTES.toString())
 
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
@@ -63,9 +64,9 @@ class MediaScanner @Inject constructor(
                 val nameCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
                 val dateCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
                 val sizeCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+                val mimeCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
                 val widthCol    = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
                 val heightCol   = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
-                val mimeCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
 
             while (cursor.moveToNext()) {
                 val id       = cursor.getLong(idCol)
@@ -73,25 +74,22 @@ class MediaScanner @Inject constructor(
                 val name     = cursor.getString(nameCol) ?: "unknown"
                 val date     = cursor.getLong(dateCol) * 1000L // to millis
                 val size     = cursor.getLong(sizeCol)
+                val mime     = cursor.getString(mimeCol) ?: "image/jpeg"
                 val width    = cursor.getInt(widthCol)
                 val height   = cursor.getInt(heightCol)
-                val mime     = cursor.getString(mimeCol) ?: "image/jpeg"
 
-                // Secondary filter: skip corrupted entries with zero dimensions
-                if (width > 0 && height > 0 && size >= MIN_FILE_SIZE_BYTES) {
-                    results.add(
-                        MediaItemEntity(
-                            uri        = uri,
-                            filePath   = uri,
-                            fileName   = name,
-                            dateAdded  = date,
-                            sizeBytes  = size,
-                            width      = width,
-                            height     = height,
-                            mimeType   = mime
-                        )
+                results.add(
+                    MediaItemEntity(
+                        uri        = uri,
+                        filePath   = uri,
+                        fileName   = name,
+                        dateAdded  = date,
+                        sizeBytes  = size,
+                        width      = width,
+                        height     = height,
+                        mimeType   = mime
                     )
-                }
+                )
             }
         }
 

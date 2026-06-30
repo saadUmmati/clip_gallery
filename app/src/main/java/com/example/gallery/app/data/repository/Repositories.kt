@@ -8,6 +8,11 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.PagingSource
+import com.example.gallery.app.R
 import com.example.gallery.app.ai.ClusterEngine
 import com.example.gallery.app.data.db.dao.ClusterDao
 import com.example.gallery.app.data.db.dao.MediaItemDao
@@ -17,7 +22,9 @@ import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.data.db.entities.RecycleBinEntity
 import com.example.gallery.app.util.MediaScanner
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,12 +35,41 @@ class MediaRepository @Inject constructor(
 ) {
     fun getAllMedia(): Flow<List<MediaItemEntity>> = mediaItemDao.getAllMedia()
 
+    /**
+     * Returns a paging flow for the main gallery grid.
+     * Room automatically invalidates the PagingSource on database writes.
+     */
+    fun getAllMediaPaged(): Flow<PagingData<MediaItemEntity>> = Pager(
+        config = PagingConfig(
+            pageSize = 60,
+            prefetchDistance = 30,
+            enablePlaceholders = true,
+            initialLoadSize = 120
+        ),
+        pagingSourceFactory = { mediaItemDao.getAllMediaPaging() }
+    ).flow
+
+    /**
+     * Returns a paging flow for search results.
+     */
+    fun searchMediaPaged(query: String): Flow<PagingData<MediaItemEntity>> = Pager(
+        config = PagingConfig(
+            pageSize = 60,
+            prefetchDistance = 30,
+            enablePlaceholders = false,
+            initialLoadSize = 120
+        ),
+        pagingSourceFactory = { mediaItemDao.searchMediaPaging(query) }
+    ).flow
+
     fun getBlurryImages(): Flow<List<MediaItemEntity>> = mediaItemDao.getBlurryImages()
 
     fun getMediaByCluster(clusterId: Int): Flow<List<MediaItemEntity>> =
         mediaItemDao.getMediaByCluster(clusterId)
 
     fun getRecycleBinItems(): Flow<List<MediaItemEntity>> = mediaItemDao.getRecycleBinItems()
+
+    fun getAllVaultItems(): Flow<List<MediaItemEntity>> = mediaItemDao.getAllVaultItems()
 
     fun getTotalCount() = mediaItemDao.getTotalCount()
 
@@ -60,7 +96,55 @@ class MediaRepository @Inject constructor(
 
     suspend fun markProcessed(uri: String) = mediaItemDao.markProcessed(uri)
 
+    suspend fun storeEmbedding(uri: String, embedding: FloatArray?) {
+        val bytes = embedding?.let { arr ->
+            java.nio.ByteBuffer.allocate(arr.size * 4).apply {
+                order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                arr.forEach { putFloat(it) }
+            }.array()
+        }
+        mediaItemDao.storeEmbedding(uri, bytes)
+    }
+
+    suspend fun getEmbedding(uri: String): FloatArray? {
+        val bytes = mediaItemDao.getEmbedding(uri) ?: return null
+        return java.nio.ByteBuffer.wrap(bytes).apply {
+            order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        }.let { buf ->
+            FloatArray(bytes.size / 4) { buf.getFloat(it) }
+        }
+    }
+
     suspend fun purgeExpiredRecycleBin(cutoff: Long) = mediaItemDao.purgeExpiredRecycleBin(cutoff)
+
+    /**
+     * Returns all processed embeddings as (uri, embedding) pairs for semantic search.
+     */
+    suspend fun getAllProcessedEmbeddings(): Map<String, FloatArray> {
+        val pairs = mediaItemDao.getAllProcessedEmbeddings()
+        return pairs.mapNotNull { pair ->
+            val bytes = pair.embedding ?: return@mapNotNull null
+            val floats = java.nio.ByteBuffer.wrap(bytes).apply {
+                order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            }.let { buf -> FloatArray(bytes.size / 4) { buf.getFloat(it) } }
+            pair.uri to floats
+        }.toMap()
+    }
+
+    /**
+     * Returns all items with embeddings for timeline construction.
+     */
+    suspend fun getAllWithEmbeddingsForTimeline(): List<Triple<String, Long, FloatArray?>> {
+        val items = mediaItemDao.getAllWithEmbeddingsForTimeline()
+        return items.map { item ->
+            val embedding = item.embedding?.let { bytes ->
+                java.nio.ByteBuffer.wrap(bytes).apply {
+                    order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                }.let { buf -> FloatArray(bytes.size / 4) { buf.getFloat(it) } }
+            }
+            Triple(item.uri, item.dateAdded, embedding)
+        }
+    }
 }
 
 @Singleton
@@ -74,7 +158,6 @@ class ClusterRepository @Inject constructor(
     suspend fun getById(id: Int) = clusterDao.getById(id)
 
     suspend fun saveClusterResults(results: List<ClusterEngine.ClusterResult>) {
-        clusterDao.clearAll()
         val entities = results.map { r ->
             ClusterEntity(
                 id           = r.clusterId,
@@ -84,7 +167,7 @@ class ClusterRepository @Inject constructor(
                 blurryCount  = r.blurryUris.size
             )
         }
-        clusterDao.insertAll(entities)
+        clusterDao.replaceAll(entities)
     }
 }
 
@@ -127,7 +210,8 @@ class DeletionRepository @Inject constructor(
 
     /**
      * Permanently deletes images from device via Scoped Storage.
-     * On Android 10+ uses MediaStore.createDeleteRequest (requires user approval).
+     * On Android 11+ uses MediaStore.createTrashRequest (sends to system trash/bin).
+     * On Android 10 uses MediaStore.createDeleteRequest (requires user approval).
      * On older Android, performs direct file deletion.
      *
      * @param launcher ActivityResultLauncher registered in the calling Activity
@@ -140,6 +224,16 @@ class DeletionRepository @Inject constructor(
         val contentUris = uris.map { Uri.parse(it) }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // API 30+ (Android 11+): use createDeleteRequest — user approves file deletion
+            val pendingIntent = MediaStore.createDeleteRequest(
+                context.contentResolver,
+                contentUris
+            )
+            launcher?.launch(
+                IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // API 29 (Android 10): createTrashRequest not available, use createDeleteRequest
             val pendingIntent = MediaStore.createDeleteRequest(
                 context.contentResolver,
                 contentUris
@@ -148,12 +242,14 @@ class DeletionRepository @Inject constructor(
                 IntentSenderRequest.Builder(pendingIntent.intentSender).build()
             )
         } else {
-            // API < 30: delete directly via contentResolver
-            contentUris.forEach { uri ->
-                try {
-                    context.contentResolver.delete(uri, null, null)
-                } catch (e: Exception) {
-                    e.printStackTrace()
+            // API < 29: delete directly via contentResolver (blocking I/O)
+            withContext(Dispatchers.IO) {
+                contentUris.forEach { uri ->
+                    try {
+                        context.contentResolver.delete(uri, null, null)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
             mediaItemDao.deleteByUris(uris)

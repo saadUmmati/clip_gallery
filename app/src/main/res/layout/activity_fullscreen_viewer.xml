@@ -6,12 +6,11 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- Full-res photo display -->
-    <ImageView
-        android:id="@+id/photoView"
+    <!-- Swipeable image pager -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/viewPager"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="fitCenter" />
+        android:layout_height="match_parent" />
 
     <!-- Toolbar overlay (toggles on tap) -->
     <com.google.android.material.appbar.MaterialToolbar
@@ -23,5 +22,19 @@
         app:titleTextColor="#FFFFFF"
         app:navigationIcon="@drawable/ic_arrow_back"
         app:navigationIconTint="#FFFFFF" />
+
+    <!-- Page counter (e.g. "3 / 120") -->
+    <TextView
+        android:id="@+id/pageCounter"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="24dp"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:background="@drawable/bg_page_counter"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:visibility="gone" />
 
 </FrameLayout>

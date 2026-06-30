@@ -7,8 +7,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.InputStream
+import java.io.FileInputStream
 import java.nio.FloatBuffer
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,10 +18,13 @@ import javax.inject.Singleton
  * Loads the CLIP ViT-B/32 ONNX model from assets and produces
  * 512-dimensional image embeddings per query image.
  *
- * PLACE YOUR MODEL FILE AT: app/src/main/assets/clip_image_encoder.onnx
+ * MODEL FILE: app/src/main/assets/clip_vision_encoder.onnx
  *
- * Input: float32[1, 3, 224, 224]  — normalized RGB image
- * Output: float32[1, 512]         — semantic embedding vector
+ * Optimizations for mobile:
+ * - Lazy OrtEnvironment init (avoids main-thread native call during DI)
+ * - Session kept alive across worker invocations (no re-init penalty)
+ * - Graph optimization enabled for faster inference
+ * - Reduced thread count (2) to avoid CPU throttling on mobile
  */
 @Singleton
 class OnnxEmbedder @Inject constructor(
@@ -28,43 +32,68 @@ class OnnxEmbedder @Inject constructor(
 ) {
 
     companion object {
-        private const val MODEL_FILE = "clip_image_encoder.onnx"
+        private const val TAG = "OnnxEmbedder"
+        private const val MODEL_FILE = "clip_vision_encoder.onnx"
         private const val IMAGE_SIZE = 224
         private const val EMBEDDING_DIM = 512
 
-        // CLIP normalization constants (ImageNet)
         private val MEAN = floatArrayOf(0.48145466f, 0.4578275f, 0.40821073f)
         private val STD  = floatArrayOf(0.26862954f, 0.26130258f, 0.27577711f)
     }
 
-    private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
+    // Lazy init — avoids OrtEnvironment native call during Hilt DI on main thread
+    private val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
 
     @Volatile
     private var session: OrtSession? = null
 
+    @Volatile
+    private var initFailed = false
+
+    fun isInitialized(): Boolean = session != null
+
     /**
-     * Lazily initializes the ONNX session.
-     * Call from a background thread — model loading is expensive.
-     * @throws FileNotFoundException if the ONNX model is missing from assets/
-     * @throws Exception if the model fails to load
+     * Initializes the ONNX session. Safe to call multiple times —
+     * subsequent calls are no-ops. Must be called from a background thread.
      */
     fun initialize() {
         if (session != null) return
+        if (initFailed) return
+
         synchronized(this) {
             if (session != null) return
-            val modelBytes = try {
-                context.assets.open(MODEL_FILE).readBytes()
-            } catch (e: java.io.FileNotFoundException) {
-                throw IllegalStateException(
-                    "ONNX model '$MODEL_FILE' not found in assets/. " +
-                    "Please place the model file at app/src/main/assets/$MODEL_FILE", e
-                )
+            if (initFailed) return
+
+            try {
+                val startTime = System.currentTimeMillis()
+
+                val modelBytes = try {
+                    context.assets.open(MODEL_FILE).readBytes()
+                } catch (e: java.io.FileNotFoundException) {
+                    initFailed = true
+                    throw IllegalStateException(
+                        "ONNX model '$MODEL_FILE' not found in assets/. " +
+                        "Place the model at app/src/main/assets/$MODEL_FILE", e
+                    )
+                }
+
+                val options = OrtSession.SessionOptions().apply {
+                    // Use optimized graph for faster inference
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                    // 2 threads — enough for mobile without causing thermal throttling
+                    setIntraOpNumThreads(2)
+                    // Reduce memory overhead
+                    setMemoryPatternOptimization(true)
+                }
+
+                session = env.createSession(modelBytes, options)
+                val elapsed = System.currentTimeMillis() - startTime
+                Log.i(TAG, "Model initialized in ${elapsed}ms (${modelBytes.size / 1024}KB)")
+            } catch (e: Exception) {
+                initFailed = true
+                Log.e(TAG, "Failed to initialize ONNX model", e)
+                throw e
             }
-            val options = OrtSession.SessionOptions().apply {
-                setIntraOpNumThreads(4)
-                addConfigEntry("session.intra_op.allow_spinning", "0")
-            }
-            session = env.createSession(modelBytes, options)
         }
     }
 
@@ -77,6 +106,7 @@ class OnnxEmbedder @Inject constructor(
             initialize()
             session ?: return null
         }
+
         val bitmap = loadAndResizeBitmap(uri) ?: return null
         val inputTensor = bitmapToTensor(bitmap)
         bitmap.recycle()
@@ -88,91 +118,89 @@ class OnnxEmbedder @Inject constructor(
                 l2Normalize(embedTensor[0])
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w(TAG, "Embed failed for $uri: ${e.message}")
             null
         } finally {
             inputTensor.close()
         }
     }
-    /**
-     * Loads and resizes image to [IMAGE_SIZE]×[IMAGE_SIZE], handling content:// URIs.
-     */
+
     private fun loadAndResizeBitmap(uri: String): Bitmap? {
         return try {
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            openStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+            // Decode bounds only (no memory allocation)
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            openStream(uri)?.use { BitmapFactory.decodeStream(it, null, boundsOpts) }
 
-            val targetSize = IMAGE_SIZE
+            if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) return null
+
+            // Calculate minimum sample size to get close to IMAGE_SIZE
+            val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight)
             var inSampleSize = 1
-            if (options.outHeight > targetSize || options.outWidth > targetSize) {
-                val halfHeight = options.outHeight / 2
-                val halfWidth = options.outWidth / 2
-                while (halfHeight / inSampleSize >= targetSize && halfWidth / inSampleSize >= targetSize) {
-                    inSampleSize *= 2
-                }
+            while (maxDim / inSampleSize > IMAGE_SIZE * 2) {
+                inSampleSize *= 2
             }
 
-            val decodeOptions = BitmapFactory.Options().apply { this.inSampleSize = inSampleSize }
-            val decoded = openStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
-            decoded?.let {
-                val scaled = Bitmap.createScaledBitmap(it, IMAGE_SIZE, IMAGE_SIZE, true)
-                if (scaled != it) it.recycle()
-                scaled
-            }
-        } catch (e: Exception) { null }
+            // Decode with sample size
+            val decodeOpts = BitmapFactory.Options().apply { this.inSampleSize = inSampleSize }
+            val decoded = openStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+                ?: return null
+
+            // Scale to exact IMAGE_SIZE
+            val scaled = Bitmap.createScaledBitmap(decoded, IMAGE_SIZE, IMAGE_SIZE, true)
+            if (scaled !== decoded) decoded.recycle()
+            scaled
+        } catch (e: Exception) {
+            null
+        }
     }
 
-    private fun openStream(uri: String) = if (uri.startsWith("content://")) {
-        context.contentResolver.openInputStream(Uri.parse(uri))
-    } else {
-        java.io.FileInputStream(uri)
-    }
-    /**
-     * Converts a Bitmap to a normalized float tensor: [1, 3, H, W]
-     * Applies CLIP-specific ImageNet mean/std normalization.
-     */
+    private fun openStream(uri: String): java.io.InputStream? = try {
+        if (uri.startsWith("content://")) {
+            context.contentResolver.openInputStream(Uri.parse(uri))
+        } else {
+            FileInputStream(uri)
+        }
+    } catch (e: Exception) { null }
+
     private fun bitmapToTensor(bitmap: Bitmap): OnnxTensor {
         val pixels = IntArray(IMAGE_SIZE * IMAGE_SIZE)
         bitmap.getPixels(pixels, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE)
 
-        val buffer = FloatBuffer.allocate(1 * 3 * IMAGE_SIZE * IMAGE_SIZE)
-        val rChannel = FloatArray(IMAGE_SIZE * IMAGE_SIZE)
-        val gChannel = FloatArray(IMAGE_SIZE * IMAGE_SIZE)
-        val bChannel = FloatArray(IMAGE_SIZE * IMAGE_SIZE)
+        val buffer = FloatBuffer.allocate(3 * IMAGE_SIZE * IMAGE_SIZE)
+        val channelSize = IMAGE_SIZE * IMAGE_SIZE
 
         for (i in pixels.indices) {
             val px = pixels[i]
-            rChannel[i] = (((px shr 16) and 0xFF) / 255f - MEAN[0]) / STD[0]
-            gChannel[i] = (((px shr 8) and 0xFF)  / 255f - MEAN[1]) / STD[1]
-            bChannel[i] = ((px and 0xFF)           / 255f - MEAN[2]) / STD[2]
+            buffer.put(i,                (((px shr 16) and 0xFF) / 255f - MEAN[0]) / STD[0])
+            buffer.put(i + channelSize,  (((px shr 8)  and 0xFF) / 255f - MEAN[1]) / STD[1])
+            buffer.put(i + channelSize * 2, ((px and 0xFF) / 255f - MEAN[2]) / STD[2])
         }
-
-        buffer.put(rChannel)
-        buffer.put(gChannel)
-        buffer.put(bChannel)
         buffer.rewind()
 
         return OnnxTensor.createTensor(
-            env,
-            buffer,
+            env, buffer,
             longArrayOf(1, 3, IMAGE_SIZE.toLong(), IMAGE_SIZE.toLong())
         )
     }
 
-    /**
-     * L2-normalizes a float vector in-place and returns it.
-     * Required for cosine similarity to work correctly.
-     */
     private fun l2Normalize(vec: FloatArray): FloatArray {
-        val norm = Math.sqrt(vec.fold(0.0) { acc, v -> acc + v * v }).toFloat()
+        var sum = 0.0
+        for (v in vec) sum += v * v
+        val norm = Math.sqrt(sum).toFloat()
         if (norm > 1e-8f) {
             for (i in vec.indices) vec[i] /= norm
         }
         return vec
     }
 
+    /**
+     * Release the ONNX session to free memory.
+     * Only call when the app is going to background or memory is critical.
+     * The session will be lazily re-created on next embed() call.
+     */
     fun release() {
         session?.close()
         session = null
+        initFailed = false
     }
 }

@@ -31,7 +31,7 @@ class OptimizeFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val optimizeViewModel: OptimizeViewModel by activityViewModels()
-    private val aiViewModel: AIViewModel by viewModels()
+    private val aiViewModel: AIViewModel by activityViewModels()
 
     private lateinit var clusterAdapter: ClusterListAdapter
     private lateinit var blurryAdapter: BlurryImagesAdapter
@@ -81,7 +81,7 @@ class OptimizeFragment : Fragment() {
 
     private fun setupBlurryList() {
         blurryAdapter = BlurryImagesAdapter(
-            onSelectionChanged = { uri, selected ->
+            onSelectionChanged = { uri, _ ->
                 optimizeViewModel.toggleSelection(uri)
             }
         )
@@ -115,7 +115,13 @@ class OptimizeFragment : Fragment() {
         }
 
         binding.btnViewRecycleBin.setOnClickListener {
-            // Navigate to recycle bin
+            val fragment = RecycleBinFragment()
+            val container = requireActivity().findViewById<android.widget.FrameLayout>(R.id.nav_host_fragment)
+            container.visibility = View.VISIBLE
+            requireActivity().supportFragmentManager.beginTransaction()
+                .replace(R.id.nav_host_fragment, fragment)
+                .addToBackStack(null)
+                .commit()
         }
     }
 
@@ -124,7 +130,7 @@ class OptimizeFragment : Fragment() {
             .setTitle(getString(R.string.confirm_move_title))
             .setMessage(getString(R.string.confirm_move_message, count))
             .setPositiveButton(getString(R.string.move_confirm)) { _, _ ->
-                val allMedia = optimizeViewModel.blurryImages.value ?: emptyList()
+                val allMedia = optimizeViewModel.allMedia.value ?: emptyList()
                 optimizeViewModel.moveSelectedToRecycleBin(allMedia)
             }
             .setNegativeButton(getString(R.string.cancel), null)
@@ -152,12 +158,27 @@ class OptimizeFragment : Fragment() {
             }
         }
 
+        // Quality breakdown
+        optimizeViewModel.allMedia.observe(viewLifecycleOwner) { allItems ->
+            val total = allItems.size
+            if (total == 0) return@observe
+
+            val blurryCount = allItems.count { it.isBlurry }
+            val duplicateCount = allItems.count { !it.isBestShot && it.clusterId != null }
+            val sharpCount = total - blurryCount
+
+            binding.sharpCount.text = sharpCount.toString()
+            binding.blurryCountQuality.text = blurryCount.toString()
+            binding.duplicateCount.text = duplicateCount.toString()
+            binding.qualityCard.visibility = View.VISIBLE
+        }
+
         optimizeViewModel.recycleBinCount.observe(viewLifecycleOwner) { count ->
             binding.recycleBinBadge.text = count.toString()
             binding.recycleBinBadge.visibility = if (count > 0) View.VISIBLE else View.GONE
         }
 
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             optimizeViewModel.deleteState.collectLatest { state ->
                 when (state) {
                     is OptimizeViewModel.DeleteState.UndoReady -> {
@@ -168,7 +189,7 @@ class OptimizeFragment : Fragment() {
             }
         }
 
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             optimizeViewModel.selectedUris.collectLatest { selected ->
                 val count = selected.size
                 binding.selectionBar.visibility = if (count > 0) View.VISIBLE else View.GONE
@@ -178,26 +199,30 @@ class OptimizeFragment : Fragment() {
             }
         }
 
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             aiViewModel.processingState.collectLatest { state ->
                 when (state) {
                     is AIViewModel.AiState.Running -> {
                         binding.aiProgressBar.visibility = View.VISIBLE
+                        binding.aiStatusText.visibility = View.VISIBLE
                         binding.aiStatusText.text = state.status
                         binding.btnRunAi.isEnabled = false
                     }
                     is AIViewModel.AiState.Done -> {
                         binding.aiProgressBar.visibility = View.GONE
+                        binding.aiStatusText.visibility = View.VISIBLE
                         binding.aiStatusText.text = getString(R.string.clusters_found_count, state.clusters)
                         binding.btnRunAi.isEnabled = true
                     }
                     is AIViewModel.AiState.Error -> {
                         binding.aiProgressBar.visibility = View.GONE
+                        binding.aiStatusText.visibility = View.VISIBLE
                         binding.aiStatusText.text = getString(R.string.ai_error_prefix, state.message)
                         binding.btnRunAi.isEnabled = true
                     }
                     else -> {
                         binding.aiProgressBar.visibility = View.GONE
+                        binding.aiStatusText.visibility = View.GONE
                         binding.btnRunAi.isEnabled = true
                     }
                 }
