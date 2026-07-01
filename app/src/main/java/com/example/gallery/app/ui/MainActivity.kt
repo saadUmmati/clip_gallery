@@ -16,6 +16,7 @@ import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.work.WorkManager
 import com.example.gallery.app.R
 import com.example.gallery.app.databinding.ActivityMainBinding
+import com.example.gallery.app.ui.gallery.AlbumsFragment
 import com.example.gallery.app.ui.gallery.GalleryFragment
 import com.example.gallery.app.ui.optimize.OptimizeFragment
 import com.example.gallery.app.viewmodel.GalleryViewModel
@@ -62,6 +63,7 @@ class MainActivity : AppCompatActivity() {
         setupTabs()
         observeScanState()
         checkPermissionsAndScan()
+        setupVaultAccess()
 
         supportFragmentManager.addOnBackStackChangedListener {
             val hasBackStack = supportFragmentManager.backStackEntryCount > 0
@@ -78,12 +80,14 @@ class MainActivity : AppCompatActivity() {
         TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
             tab.text = when (position) {
                 0 -> getString(R.string.tab_gallery)
-                1 -> getString(R.string.tab_optimize)
+                1 -> getString(R.string.tab_albums)
+                2 -> getString(R.string.tab_optimize)
                 else -> ""
             }
             tab.setIcon(when (position) {
                 0 -> R.drawable.ic_gallery
-                1 -> R.drawable.ic_optimize
+                1 -> R.drawable.ic_albums
+                2 -> R.drawable.ic_optimize
                 else -> 0
             })
         }.attach()
@@ -157,15 +161,32 @@ class MainActivity : AppCompatActivity() {
         }.show()
     }
 
+    private fun setupVaultAccess() {
+        binding.toolbar.setOnLongClickListener {
+            val intent = android.content.Intent(this, com.example.gallery.app.ui.vault.VaultActivity::class.java)
+            startActivity(intent)
+            true
+        }
+    }
+
     fun switchToOptimizeTab() {
+        binding.viewPager.currentItem = 2
+    }
+
+    fun switchToGalleryTab() {
+        binding.viewPager.currentItem = 0
+    }
+
+    fun switchToAlbumsTab() {
         binding.viewPager.currentItem = 1
     }
 
     inner class MainPagerAdapter(activity: AppCompatActivity) : FragmentStateAdapter(activity) {
-        override fun getItemCount() = 2
+        override fun getItemCount() = 3
         override fun createFragment(position: Int): Fragment = when (position) {
             0 -> GalleryFragment()
-            1 -> OptimizeFragment()
+            1 -> AlbumsFragment()
+            2 -> OptimizeFragment()
             else -> GalleryFragment()
         }
     }

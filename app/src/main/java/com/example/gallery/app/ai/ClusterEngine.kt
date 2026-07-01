@@ -26,7 +26,8 @@ class ClusterEngine @Inject constructor() {
         val clusterId: Int,
         val memberUris: List<String>,
         val bestShotUri: String,
-        val blurryUris: List<String>
+        val blurryUris: List<String>,
+        val folder: String = "Unknown"
     )
 
     /**

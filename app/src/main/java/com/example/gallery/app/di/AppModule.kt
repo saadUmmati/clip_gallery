@@ -28,8 +28,10 @@ object AppModule {
         )
             .addMigrations(
                 ClipGalleryDatabase.MIGRATION_1_2,
-                ClipGalleryDatabase.MIGRATION_2_3
+                ClipGalleryDatabase.MIGRATION_2_3,
+                ClipGalleryDatabase.MIGRATION_3_4
             )
+            .fallbackToDestructiveMigration()
             .build()
     }
 

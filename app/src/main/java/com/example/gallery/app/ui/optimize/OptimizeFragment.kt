@@ -90,7 +90,17 @@ class OptimizeFragment : Fragment() {
 
     private fun setupButtons() {
         binding.btnRunAi.setOnClickListener {
-            aiViewModel.startProcessing(WorkManager.getInstance(requireContext().applicationContext))
+            val selected = optimizeViewModel.selectedUris.value
+            if (selected.isEmpty()) {
+                Snackbar.make(binding.root, "Select photos in the Gallery tab first, then tap Send to AI", Snackbar.LENGTH_LONG).show()
+                (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.switchToGalleryTab()
+                return@setOnClickListener
+            }
+            aiViewModel.startProcessing(
+                WorkManager.getInstance(requireContext().applicationContext),
+                selected.toList()
+            )
+            optimizeViewModel.clearSelection()
         }
 
         binding.btnSelectAllBlurry.setOnClickListener {

@@ -32,6 +32,26 @@
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
+        <!-- Folder filter chips -->
+        <HorizontalScrollView
+            android:id="@+id/folderFilterScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:visibility="visible">
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/folderChipGroup"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:singleSelection="true"
+                app:selectionRequired="false" />
+
+        </HorizontalScrollView>
+
     </LinearLayout>
 
     <!-- Photo grid -->

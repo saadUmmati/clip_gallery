@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.*
@@ -25,20 +26,15 @@ class AiProcessingWorker @AssistedInject constructor(
     private val embedder: OnnxEmbedder,
     private val sharpness: SharpnessAnalyzer,
     private val clusterEngine: ClusterEngine
-) : CoroutineWorker(context, params) {
+) : CoroutineWorker(applicationContext, params) {
 
     companion object {
+        private const val TAG = "AiProcessingWorker"
         const val WORK_NAME = "ai_processing"
         const val BATCH_SIZE = 50
         const val KEY_URIS = "uris"
         const val CHANNEL_ID = "ai_processing_channel"
         const val NOTIFICATION_ID = 1001
-
-        fun buildRequest(): OneTimeWorkRequest {
-            return OneTimeWorkRequestBuilder<AiProcessingWorker>()
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                .build()
-        }
 
         fun buildRequest(uris: List<String>): OneTimeWorkRequest {
             return OneTimeWorkRequestBuilder<AiProcessingWorker>()
@@ -120,7 +116,7 @@ class AiProcessingWorker @AssistedInject constructor(
                         }
                         processedSharpness[uri] = score
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        Log.w(TAG, "Failed to embed $uri: ${e.message}")
                     }
 
                     processedCount++
@@ -157,33 +153,82 @@ class AiProcessingWorker @AssistedInject constructor(
                             }
                             processedSharpness[item.uri] = score
                         } catch (e: Exception) {
-                            e.printStackTrace()
+                            Log.w(TAG, "Failed to embed ${item.uri}: ${e.message}")
                         }
                     }
                 }
             }
 
-            setForeground(buildForegroundInfo("Clustering images…"))
-            setProgress(workDataOf("status" to "Clustering images…"))
+            // ── Step 2: Cluster PER FOLDER ──
+            setForeground(buildForegroundInfo("Clustering images by folder…"))
+            setProgress(workDataOf("status" to "Clustering images by folder…"))
 
+            // Build COMPLETE folder map for ALL images with embeddings (new + existing)
+            // This is critical — we need folder info for every embedding, not just newly processed ones
             val allEmbeddings = mutableMapOf<String, FloatArray>()
             val allSharpness  = mutableMapOf<String, Float>()
 
             if (isSelective) {
+                // Load ALL existing embeddings + folder info from DB
                 val existingEmbeddings = mediaRepository.getAllProcessedEmbeddings()
                 allEmbeddings.putAll(existingEmbeddings)
                 allEmbeddings.putAll(processedEmbeddings)
+
+                // Load ALL existing sharpness from DB (we don't have it, use 0 as placeholder)
+                for (uri in existingEmbeddings.keys) {
+                    if (uri !in processedSharpness) {
+                        allSharpness[uri] = 0f
+                    }
+                }
                 allSharpness.putAll(processedSharpness)
             } else {
                 allEmbeddings.putAll(processedEmbeddings)
                 allSharpness.putAll(processedSharpness)
             }
 
-            val clusterResults = clusterEngine.cluster(allEmbeddings, allSharpness)
+            // Load folder info for EVERY embedding from DB (single query)
+            val uriToFolders = mediaRepository.getFoldersForUris(allEmbeddings.keys.toList())
+            Log.d(TAG, "Loaded folder info for ${uriToFolders.size}/${allEmbeddings.size} URIs")
 
-            clusterRepository.saveClusterResults(clusterResults)
+            // Group embeddings by folder
+            val folderEmbeddings = mutableMapOf<String, MutableMap<String, FloatArray>>()
+            val folderSharpness  = mutableMapOf<String, MutableMap<String, Float>>()
 
-            for (result in clusterResults) {
+            for ((uri, embedding) in allEmbeddings) {
+                val folder = uriToFolders[uri] ?: "Unknown"
+                folderEmbeddings.getOrPut(folder) { mutableMapOf() }[uri] = embedding
+                val score = allSharpness[uri]
+                if (score != null) {
+                    folderSharpness.getOrPut(folder) { mutableMapOf() }[uri] = score
+                }
+            }
+
+            Log.d(TAG, "Folders with embeddings: ${folderEmbeddings.keys}")
+
+            // Cluster within each folder
+            val allClusterResults = mutableListOf<ClusterEngine.ClusterResult>()
+            var globalClusterOffset = 0
+
+            for ((folder, embeddings) in folderEmbeddings) {
+                val folderSharp = folderSharpness[folder] ?: emptyMap()
+                val folderResults = clusterEngine.cluster(embeddings, folderSharp)
+
+                val offsetResults = folderResults.map { result ->
+                    result.copy(clusterId = result.clusterId + globalClusterOffset, folder = folder)
+                }
+                allClusterResults.addAll(offsetResults)
+                globalClusterOffset += folderResults.size
+
+                Log.d(TAG, "Folder '$folder': ${embeddings.size} images → ${folderResults.size} clusters")
+            }
+
+            setForeground(buildForegroundInfo("Saving results…"))
+            setProgress(workDataOf("status" to "Saving ${allClusterResults.size} albums…"))
+
+            Log.i(TAG, "Saving ${allClusterResults.size} clusters")
+            clusterRepository.saveClusterResults(allClusterResults)
+
+            for (result in allClusterResults) {
                 for (uri in result.memberUris) {
                     mediaRepository.updateAiResults(
                         uri        = uri,
@@ -196,13 +241,17 @@ class AiProcessingWorker @AssistedInject constructor(
             }
 
             val processedCount = if (isSelective) selectedUris!!.size else processedEmbeddings.size
+            val folderCount = folderEmbeddings.size
+            Log.i(TAG, "Done: $processedCount images across $folderCount folders → ${allClusterResults.size} clusters")
+
             Result.success(workDataOf(
                 "status" to "Done",
-                "clusters" to clusterResults.size,
-                "processed" to processedCount
+                "clusters" to allClusterResults.size,
+                "processed" to processedCount,
+                "folders" to folderCount
             ))
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "AI processing failed", e)
             Result.failure(workDataOf("error" to e.message))
         }
     }

@@ -40,6 +40,9 @@ class GalleryViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow<String>("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _folderFilter = MutableStateFlow<String?>(null)
+    val folderFilter: StateFlow<String?> = _folderFilter.asStateFlow()
+
     private val _searchMode = MutableStateFlow(SearchMode.TEXT)
     val searchMode: StateFlow<SearchMode> = _searchMode.asStateFlow()
 
@@ -54,12 +57,19 @@ class GalleryViewModel @Inject constructor(
      * Automatically invalidated when Room database changes.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    val pagedMedia: Flow<PagingData<MediaItemEntity>> = _searchQuery
-        .flatMapLatest { query ->
-            if (query.isBlank()) {
-                mediaRepository.getAllMediaPaged()
-            } else {
-                mediaRepository.searchMediaPaged(query)
+    val pagedMedia: Flow<PagingData<MediaItemEntity>> = combine(
+        _searchQuery, _folderFilter
+    ) { query, folder -> Pair(query, folder) }
+        .flatMapLatest { (query, folder) ->
+            when {
+                folder != null && query.isNotBlank() ->
+                    mediaRepository.searchMediaByFolderPaged(query, folder)
+                folder != null ->
+                    mediaRepository.getMediaByFolderPaged(folder)
+                query.isNotBlank() ->
+                    mediaRepository.searchMediaPaged(query)
+                else ->
+                    mediaRepository.getAllMediaPaged()
             }
         }.cachedIn(viewModelScope)
 
@@ -78,6 +88,9 @@ class GalleryViewModel @Inject constructor(
     val totalCount: LiveData<Int> = mediaRepository.getTotalCount()
 
     val totalSize: LiveData<Long> = mediaRepository.getTotalSize()
+
+    val allFolders: LiveData<List<com.example.gallery.app.data.db.entities.FolderInfo>> =
+        mediaRepository.getAllFolders().asLiveData()
 
     // ── Multi-selection state for gallery grid ──
     private val _selectedUris = MutableStateFlow<Set<String>>(emptySet())
@@ -139,6 +152,10 @@ class GalleryViewModel @Inject constructor(
         } else {
             _semanticResults.value = emptyList()
         }
+    }
+
+    fun setFolderFilter(folder: String?) {
+        _folderFilter.value = folder
     }
 
     private fun performSemanticSearch(query: String) {
@@ -209,6 +226,9 @@ class OptimizeViewModel @Inject constructor(
     val recycleBinCount: LiveData<Int> = deletionRepository.getRecycleBinCount()
 
     val recycleBinSize: LiveData<Long> = deletionRepository.getRecycleBinSize()
+
+    suspend fun getClusterPreviewUris(clusterId: Int, limit: Int = 4): List<String> =
+        clusterRepository.getClusterPreviewUris(clusterId, limit)
 
     private val _selectedUris = MutableStateFlow<Set<String>>(emptySet())
     val selectedUris: StateFlow<Set<String>> = _selectedUris.asStateFlow()
@@ -313,32 +333,6 @@ class AIViewModel @Inject constructor(
 
     private val _processingState = MutableStateFlow<AiState>(AiState.Idle)
     val processingState: StateFlow<AiState> = _processingState.asStateFlow()
-
-    fun startProcessing(workManager: WorkManager) {
-        _processingState.value = AiState.Running(0, "Starting…")
-        val request = AiProcessingWorker.buildRequest()
-        workManager.enqueue(request)
-
-        viewModelScope.launch {
-            workManager.getWorkInfoByIdFlow(request.id)
-                .takeWhile { info -> info?.state?.isFinished != true }
-                .collect { info ->
-                    info?.progress?.let { data ->
-                        val status = data.getString("status") ?: "Processing…"
-                        val processed = data.getInt("processed", 0)
-                        _processingState.value = AiState.Running(processed, status)
-                    }
-                    if (info?.state?.isFinished == true) {
-                        _processingState.value = if (info.state == WorkInfo.State.SUCCEEDED) {
-                            val clusters = info.outputData.getInt("clusters", 0)
-                            AiState.Done(clusters)
-                        } else {
-                            AiState.Error(info.outputData.getString("error") ?: "Unknown error")
-                        }
-                    }
-                }
-        }
-    }
 
     fun startProcessing(workManager: WorkManager, uris: List<String>) {
         _processingState.value = AiState.Running(0, "Starting…")

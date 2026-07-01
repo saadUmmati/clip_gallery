@@ -5,6 +5,7 @@ import androidx.paging.PagingSource
 import androidx.room.*
 import com.example.gallery.app.data.db.entities.ClusterEntity
 import com.example.gallery.app.data.db.entities.EmbeddingPair
+import com.example.gallery.app.data.db.entities.FolderInfo
 import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.data.db.entities.RecycleBinEntity
 import com.example.gallery.app.data.db.entities.TimelineItem
@@ -21,6 +22,9 @@ interface MediaItemDao {
 
     @Query("SELECT * FROM media_items WHERE isInRecycleBin = 0 AND isInVault = 0 AND (fileName LIKE '%' || :query || '%' OR mimeType LIKE '%' || :query || '%') ORDER BY dateAdded DESC")
     fun searchMediaPaging(query: String): PagingSource<Int, MediaItemEntity>
+
+    @Query("SELECT * FROM media_items WHERE isInRecycleBin = 0 AND isInVault = 0 AND folder = :folder AND (fileName LIKE '%' || :query || '%' OR mimeType LIKE '%' || :query || '%') ORDER BY dateAdded DESC")
+    fun searchMediaByFolderPaging(query: String, folder: String): PagingSource<Int, MediaItemEntity>
 
     @Query("SELECT * FROM media_items WHERE clusterId = :clusterId AND isInRecycleBin = 0")
     fun getMediaByCluster(clusterId: Int): Flow<List<MediaItemEntity>>
@@ -103,6 +107,29 @@ interface MediaItemDao {
 
     @Query("SELECT uri, embedding, dateAdded FROM media_items WHERE embeddingProcessed = 1 AND isInRecycleBin = 0 AND isInVault = 0 AND embedding IS NOT NULL ORDER BY dateAdded DESC")
     suspend fun getAllWithEmbeddingsForTimeline(): List<TimelineItem>
+
+    // Folder/Album queries
+    @Query("SELECT folder, COUNT(*) as imageCount, MIN(uri) as coverUri FROM media_items WHERE isInRecycleBin = 0 AND isInVault = 0 GROUP BY folder ORDER BY imageCount DESC")
+    fun getAllFolders(): Flow<List<FolderInfo>>
+
+    @Query("SELECT * FROM media_items WHERE folder = :folder AND isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC")
+    fun getMediaByFolder(folder: String): Flow<List<MediaItemEntity>>
+
+    @Query("SELECT * FROM media_items WHERE folder = :folder AND isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC")
+    fun getMediaByFolderPaging(folder: String): PagingSource<Int, MediaItemEntity>
+
+    @Query("SELECT COUNT(*) FROM media_items WHERE folder = :folder AND isInRecycleBin = 0")
+    fun getFolderCount(folder: String): LiveData<Int>
+
+    // Per-folder embeddings for cluster-per-folder
+    @Query("SELECT uri, embedding FROM media_items WHERE embeddingProcessed = 1 AND isInRecycleBin = 0 AND isInVault = 0 AND embedding IS NOT NULL AND folder = :folder")
+    suspend fun getEmbeddingsByFolder(folder: String): List<EmbeddingPair>
+
+    @Query("SELECT DISTINCT folder FROM media_items WHERE embeddingProcessed = 1 AND isInRecycleBin = 0 AND isInVault = 0 AND embedding IS NOT NULL")
+    suspend fun getFoldersWithEmbeddings(): List<String>
+
+    @Query("SELECT uri, folder FROM media_items WHERE uri IN (:uris)")
+    suspend fun getFoldersForUris(uris: List<String>): List<UriFolder>
 }
 
 @Dao
@@ -116,6 +143,9 @@ interface ClusterDao {
 
     @Query("SELECT COUNT(*) FROM clusters")
     fun getClusterCount(): LiveData<Int>
+
+    @Query("SELECT uri FROM media_items WHERE clusterId = :clusterId AND isInRecycleBin = 0 ORDER BY sharpnessScore DESC LIMIT :limit")
+    suspend fun getClusterPreviewUris(clusterId: Int, limit: Int = 4): List<String>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(clusters: List<ClusterEntity>)

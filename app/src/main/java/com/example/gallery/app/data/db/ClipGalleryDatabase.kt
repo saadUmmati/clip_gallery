@@ -18,7 +18,7 @@ import com.example.gallery.app.data.db.entities.RecycleBinEntity
         ClusterEntity::class,
         RecycleBinEntity::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = true
 )
 abstract class ClipGalleryDatabase : RoomDatabase() {
@@ -36,6 +36,12 @@ abstract class ClipGalleryDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE media_items ADD COLUMN isInVault INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE media_items ADD COLUMN folder TEXT NOT NULL DEFAULT 'Unknown'")
             }
         }
     }

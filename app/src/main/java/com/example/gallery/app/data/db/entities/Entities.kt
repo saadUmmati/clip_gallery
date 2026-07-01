@@ -19,6 +19,7 @@ data class MediaItemEntity(
     val width: Int,
     val height: Int,
     val mimeType: String,
+    val folder: String = "Unknown",       // Album/folder name from MediaStore bucket
 
     // AI-generated fields (null until processed)
     val clusterId: Int? = null,
@@ -49,6 +50,7 @@ data class MediaItemEntity(
             width == other.width &&
             height == other.height &&
             mimeType == other.mimeType &&
+            folder == other.folder &&
             clusterId == other.clusterId &&
             sharpnessScore == other.sharpnessScore &&
             isBestShot == other.isBestShot &&
@@ -65,6 +67,7 @@ data class MediaItemEntity(
         result = 31 * result + fileName.hashCode()
         result = 31 * result + dateAdded.hashCode()
         result = 31 * result + sizeBytes.hashCode()
+        result = 31 * result + folder.hashCode()
         result = 31 * result + clusterId.hashCode()
         result = 31 * result + isBestShot.hashCode()
         result = 31 * result + isBlurry.hashCode()
@@ -79,7 +82,7 @@ data class MediaItemEntity(
  */
 @Entity(tableName = "clusters")
 data class ClusterEntity(
-    @PrimaryKey(autoGenerate = true)
+    @PrimaryKey
     val id: Int = 0,
     val label: String,                  // Human-readable cluster concept
     val bestShotUri: String?,           // URI of highest sharpness image
@@ -122,4 +125,21 @@ data class TimelineItem(
     val dateAdded: Long,
     @ColumnInfo(typeAffinity = ColumnInfo.BLOB)
     val embedding: ByteArray?
+)
+
+/**
+ * Lightweight projection for album/folder listing.
+ */
+data class FolderInfo(
+    val folder: String,
+    val imageCount: Int,
+    val coverUri: String?
+)
+
+/**
+ * Lightweight projection for batch folder lookup.
+ */
+data class UriFolder(
+    val uri: String,
+    val folder: String
 )

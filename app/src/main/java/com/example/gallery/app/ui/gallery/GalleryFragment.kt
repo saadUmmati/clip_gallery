@@ -51,6 +51,7 @@ class GalleryFragment : Fragment() {
         setupFab()
         setupVaultButton()
         setupViewToggle()
+        setupFolderFilter()
         observeViewModel()
     }
 
@@ -127,7 +128,7 @@ class GalleryFragment : Fragment() {
                 uris
             )
 
-            (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.switchToOptimizeTab()
+            (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.switchToAlbumsTab()
             viewModel.clearSelection()
         }
     }
@@ -161,6 +162,37 @@ class GalleryFragment : Fragment() {
             }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
+    }
+
+    private fun setupFolderFilter() {
+        viewModel.allFolders.observe(viewLifecycleOwner) { folders ->
+            if (folders.size <= 1) {
+                binding.folderFilterScroll.visibility = View.GONE
+                return@observe
+            }
+
+            binding.folderFilterScroll.visibility = View.VISIBLE
+            binding.folderChipGroup.removeAllViews()
+
+            // "All" chip
+            val allChip = com.google.android.material.chip.Chip(requireContext()).apply {
+                text = "All"
+                isCheckable = true
+                isChecked = viewModel.folderFilter.value == null
+                setOnClickListener { viewModel.setFolderFilter(null) }
+            }
+            binding.folderChipGroup.addView(allChip)
+
+            for (folder in folders) {
+                val chip = com.google.android.material.chip.Chip(requireContext()).apply {
+                    text = "${folder.folder} (${folder.imageCount})"
+                    isCheckable = true
+                    isChecked = viewModel.folderFilter.value == folder.folder
+                    setOnClickListener { viewModel.setFolderFilter(folder.folder) }
+                }
+                binding.folderChipGroup.addView(chip)
+            }
+        }
     }
 
     private fun observeViewModel() {

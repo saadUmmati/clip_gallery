@@ -4,6 +4,7 @@
 
     <!-- Tab labels -->
     <string name="tab_gallery">Gallery</string>
+    <string name="tab_albums">Albums</string>
     <string name="tab_optimize">Optimize</string>
 
     <!-- Permissions -->
@@ -21,6 +22,7 @@
 
     <!-- Optimize -->
     <string name="run_ai_analysis">Run AI Analysis</string>
+    <string name="run_ai_on_selected">Analyze Selected</string>
     <string name="ai_running">Analyzing photos…</string>
     <string name="clusters_found">%d clusters found</string>
     <string name="blurry_images">%d blurry images</string>

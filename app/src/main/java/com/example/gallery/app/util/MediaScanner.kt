@@ -39,7 +39,8 @@ class MediaScanner @Inject constructor(
             MediaStore.Images.Media.SIZE,
             MediaStore.Images.Media.MIME_TYPE,
             MediaStore.Images.Media.WIDTH,
-            MediaStore.Images.Media.HEIGHT
+            MediaStore.Images.Media.HEIGHT,
+            MediaStore.Images.Media.BUCKET_DISPLAY_NAME
         )
 
         // Remove dimensions from selection to be more compatible with different devices/versions
@@ -67,6 +68,7 @@ class MediaScanner @Inject constructor(
                 val mimeCol     = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
                 val widthCol    = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
                 val heightCol   = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
+                val bucketCol   = cursor.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
 
             while (cursor.moveToNext()) {
                 val id       = cursor.getLong(idCol)
@@ -77,6 +79,7 @@ class MediaScanner @Inject constructor(
                 val mime     = cursor.getString(mimeCol) ?: "image/jpeg"
                 val width    = cursor.getInt(widthCol)
                 val height   = cursor.getInt(heightCol)
+                val folder   = if (bucketCol >= 0) cursor.getString(bucketCol) ?: "Unknown" else "Unknown"
 
                 results.add(
                     MediaItemEntity(
@@ -87,7 +90,8 @@ class MediaScanner @Inject constructor(
                         sizeBytes  = size,
                         width      = width,
                         height     = height,
-                        mimeType   = mime
+                        mimeType   = mime,
+                        folder     = folder
                     )
                 )
             }

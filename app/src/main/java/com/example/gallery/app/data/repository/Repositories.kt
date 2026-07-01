@@ -18,8 +18,10 @@ import com.example.gallery.app.data.db.dao.ClusterDao
 import com.example.gallery.app.data.db.dao.MediaItemDao
 import com.example.gallery.app.data.db.dao.RecycleBinDao
 import com.example.gallery.app.data.db.entities.ClusterEntity
+import com.example.gallery.app.data.db.entities.FolderInfo
 import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.data.db.entities.RecycleBinEntity
+import com.example.gallery.app.data.db.entities.UriFolder
 import com.example.gallery.app.util.MediaScanner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +72,64 @@ class MediaRepository @Inject constructor(
     fun getRecycleBinItems(): Flow<List<MediaItemEntity>> = mediaItemDao.getRecycleBinItems()
 
     fun getAllVaultItems(): Flow<List<MediaItemEntity>> = mediaItemDao.getAllVaultItems()
+
+    // Folder/Album methods
+    fun getAllFolders(): Flow<List<FolderInfo>> = mediaItemDao.getAllFolders()
+
+    fun getMediaByFolder(folder: String): Flow<List<MediaItemEntity>> =
+        mediaItemDao.getMediaByFolder(folder)
+
+    fun getMediaByFolderPaged(folder: String): Flow<PagingData<MediaItemEntity>> = Pager(
+        config = PagingConfig(
+            pageSize = 60,
+            prefetchDistance = 30,
+            enablePlaceholders = true,
+            initialLoadSize = 120
+        ),
+        pagingSourceFactory = { mediaItemDao.getMediaByFolderPaging(folder) }
+    ).flow
+
+    fun searchMediaByFolderPaged(query: String, folder: String): Flow<PagingData<MediaItemEntity>> = Pager(
+        config = PagingConfig(
+            pageSize = 60,
+            prefetchDistance = 30,
+            enablePlaceholders = false,
+            initialLoadSize = 120
+        ),
+        pagingSourceFactory = { mediaItemDao.searchMediaByFolderPaging(query, folder) }
+    ).flow
+
+    fun getFolderCount(folder: String) = mediaItemDao.getFolderCount(folder)
+
+    /**
+     * Returns embeddings grouped by folder for per-folder clustering.
+     */
+    suspend fun getEmbeddingsByFolder(): Map<String, Map<String, FloatArray>> {
+        val folders = mediaItemDao.getFoldersWithEmbeddings()
+        val result = mutableMapOf<String, Map<String, FloatArray>>()
+        for (folder in folders) {
+            val pairs = mediaItemDao.getEmbeddingsByFolder(folder)
+            result[folder] = pairs.mapNotNull { pair ->
+                val bytes = pair.embedding ?: return@mapNotNull null
+                val floats = java.nio.ByteBuffer.wrap(bytes).apply {
+                    order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                }.let { buf -> FloatArray(bytes.size / 4) { buf.getFloat(it) } }
+                pair.uri to floats
+            }.toMap()
+        }
+        return result
+    }
+
+    suspend fun getByUri(uri: String): MediaItemEntity? = mediaItemDao.getByUri(uri)
+
+    /**
+     * Batch-load folder info for a list of URIs. Returns map of uri → folder.
+     */
+    suspend fun getFoldersForUris(uris: List<String>): Map<String, String> {
+        if (uris.isEmpty()) return emptyMap()
+        val results = mediaItemDao.getFoldersForUris(uris)
+        return results.associate { it.uri to it.folder }
+    }
 
     fun getTotalCount() = mediaItemDao.getTotalCount()
 
@@ -157,11 +217,29 @@ class ClusterRepository @Inject constructor(
 
     suspend fun getById(id: Int) = clusterDao.getById(id)
 
+    suspend fun getClusterPreviewUris(clusterId: Int, limit: Int = 4): List<String> =
+        clusterDao.getClusterPreviewUris(clusterId, limit)
+
     suspend fun saveClusterResults(results: List<ClusterEngine.ClusterResult>) {
+        // Group by folder to generate folder-based labels
+        val folderCounts = mutableMapOf<String, Int>()
+
         val entities = results.map { r ->
+            val folder = r.folder
+            val count = folderCounts.getOrPut(folder) { 0 } + 1
+            folderCounts[folder] = count
+
+            val label = if (results.count { it.folder == folder } == 1) {
+                // Single cluster in this folder — just use folder name
+                folder
+            } else {
+                // Multiple clusters in same folder — add number
+                "$folder ($count)"
+            }
+
             ClusterEntity(
                 id           = r.clusterId,
-                label        = "Cluster ${r.clusterId + 1}",
+                label        = label,
                 bestShotUri  = r.bestShotUri,
                 memberCount  = r.memberUris.size,
                 blurryCount  = r.blurryUris.size
