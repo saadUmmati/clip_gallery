@@ -23,6 +23,11 @@
         <!-- ActionBar hidden — using MaterialToolbar -->
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
+
+        <!-- Material 3 Type Scale Mapping -->
+        <item name="textAppearanceHeadlineLarge">@style/TextAppearance.ClipGallery.HeadlineLarge</item>
+        <item name="textAppearanceTitleMedium">@style/TextAppearance.ClipGallery.TitleMedium</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.ClipGallery.BodyMedium</item>
     </style>
 
     <!-- Splash screen theme -->
@@ -52,6 +57,22 @@
     <style name="BottomSheetStyle" parent="Widget.Material3.BottomSheet.Modal">
         <item name="backgroundTint">@color/surface_dark</item>
         <item name="android:elevation">16dp</item>
+    </style>
+
+    <!-- M3 Type Scale Styles -->
+    <style name="TextAppearance.ClipGallery.HeadlineLarge" parent="TextAppearance.Material3.HeadlineLarge">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="TextAppearance.ClipGallery.TitleMedium" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/text_primary</item>
+    </style>
+
+    <style name="TextAppearance.ClipGallery.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textColor">@color/text_secondary</item>
     </style>
 
 </resources>

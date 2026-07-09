@@ -9,16 +9,18 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.FloatBuffer
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Loads the CLIP ViT-B/32 ONNX model from assets and produces
- * 512-dimensional image embeddings per query image.
+ * Loads the DINOv2-small INT8 ONNX model from assets and produces
+ * 384-dimensional image embeddings per query image.
  *
- * MODEL FILE: app/src/main/assets/clip_vision_encoder.onnx
+ * MODEL FILE: app/src/main/assets/dinov2_small_embedder_int8.onnx
  *
  * Optimizations for mobile:
  * - Lazy OrtEnvironment init (avoids main-thread native call during DI)
@@ -33,9 +35,9 @@ class OnnxEmbedder @Inject constructor(
 
     companion object {
         private const val TAG = "OnnxEmbedder"
-        private const val MODEL_FILE = "clip_vision_encoder.onnx"
+        private const val MODEL_FILE = "dinov2_small_embedder_int8.onnx"
         private const val IMAGE_SIZE = 224
-        private const val EMBEDDING_DIM = 512
+        private const val EMBEDDING_DIM = 384
 
         private val MEAN = floatArrayOf(0.48145466f, 0.4578275f, 0.40821073f)
         private val STD  = floatArrayOf(0.26862954f, 0.26130258f, 0.27577711f)
@@ -67,28 +69,29 @@ class OnnxEmbedder @Inject constructor(
             try {
                 val startTime = System.currentTimeMillis()
 
-                val modelBytes = try {
-                    context.assets.open(MODEL_FILE).readBytes()
-                } catch (e: java.io.FileNotFoundException) {
-                    initFailed = true
-                    throw IllegalStateException(
-                        "ONNX model '$MODEL_FILE' not found in assets/. " +
-                        "Place the model at app/src/main/assets/$MODEL_FILE", e
-                    )
+                val modelDir = File(context.filesDir, "onnx_models")
+                modelDir.mkdirs()
+
+                val modelFile = File(modelDir, MODEL_FILE)
+
+                // Copy model from assets to internal storage (so ONNX can find the .data companion)
+                if (!modelFile.exists() || modelFile.length() == 0L) {
+                    Log.i(TAG, "Copying model from assets to internal storage...")
+                    copyAsset(MODEL_FILE, modelFile)
+                    Log.i(TAG, "Model copied: ${modelFile.length() / 1024}KB")
                 }
 
                 val options = OrtSession.SessionOptions().apply {
-                    // Use optimized graph for faster inference
                     setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                    // 2 threads — enough for mobile without causing thermal throttling
                     setIntraOpNumThreads(2)
-                    // Reduce memory overhead
                     setMemoryPatternOptimization(true)
+                    addCPU(true)
                 }
 
-                session = env.createSession(modelBytes, options)
+                // Load by file path so ONNX Runtime can find the .data companion
+                session = env.createSession(modelFile.absolutePath, options)
                 val elapsed = System.currentTimeMillis() - startTime
-                Log.i(TAG, "Model initialized in ${elapsed}ms (${modelBytes.size / 1024}KB)")
+                Log.i(TAG, "Model initialized in ${elapsed}ms")
             } catch (e: Exception) {
                 initFailed = true
                 Log.e(TAG, "Failed to initialize ONNX model", e)
@@ -97,8 +100,16 @@ class OnnxEmbedder @Inject constructor(
         }
     }
 
+    private fun copyAsset(assetName: String, dest: File) {
+        context.assets.open(assetName).use { input ->
+            FileOutputStream(dest).use { output ->
+                input.copyTo(output)
+            }
+        }
+    }
+
     /**
-     * Generates a 512-dim normalized embedding for the image at [uri].
+     * Generates a 384-dim normalized embedding for the image at [uri].
      * Returns null if the image cannot be decoded or inference fails.
      */
     fun embed(uri: String): FloatArray? {
@@ -112,7 +123,7 @@ class OnnxEmbedder @Inject constructor(
         bitmap.recycle()
 
         return try {
-            val inputMap = mapOf("input" to inputTensor)
+            val inputMap = mapOf("pixel_values" to inputTensor)
             sess.run(inputMap).use { output ->
                 val embedTensor = output[0].value as Array<FloatArray>
                 l2Normalize(embedTensor[0])

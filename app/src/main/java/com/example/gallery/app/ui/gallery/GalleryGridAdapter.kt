@@ -14,7 +14,7 @@ import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.databinding.ItemGalleryThumbnailBinding
 
 class GalleryGridAdapter(
-    private val onItemClick: (MediaItemEntity) -> Unit,
+    private val onItemClick: (MediaItemEntity, View) -> Unit,
     private val onLongPress: (MediaItemEntity) -> Unit,
     private val onSelectionToggle: (MediaItemEntity) -> Unit
 ) : PagingDataAdapter<MediaItemEntity, GalleryGridAdapter.ThumbnailViewHolder>(DiffCallback) {
@@ -23,13 +23,22 @@ class GalleryGridAdapter(
         set(value) {
             val old = field
             field = value
-            snapshot().forEachIndexed { index, item ->
+            val snapshot = snapshot()
+            val changedIndices = mutableListOf<Int>()
+            snapshot.forEachIndexed { index, item ->
                 if (item != null) {
                     val wasSelected = old.contains(item.uri)
                     val isSelected = value.contains(item.uri)
                     if (wasSelected != isSelected) {
-                        notifyItemChanged(index, PAYLOAD_SELECTION)
+                        changedIndices.add(index)
                     }
+                }
+            }
+            if (changedIndices.size > 30) {
+                notifyDataSetChanged()
+            } else {
+                for (idx in changedIndices) {
+                    notifyItemChanged(idx, PAYLOAD_SELECTION)
                 }
             }
         }
@@ -81,6 +90,9 @@ class GalleryGridAdapter(
         fun bind(item: MediaItemEntity) {
             boundItem = item
 
+            // Assign transition name for shared element transition
+            binding.thumbnail.transitionName = "transition_image_${item.uri}"
+
             // Load thumbnail via Glide
             Glide.with(binding.thumbnail)
                 .load(item.uri)
@@ -100,7 +112,7 @@ class GalleryGridAdapter(
                 binding.root.setOnClickListener { onSelectionToggle(item) }
                 binding.root.setOnLongClickListener(null)
             } else {
-                binding.root.setOnClickListener { onItemClick(item) }
+                binding.root.setOnClickListener { onItemClick(item, binding.thumbnail) }
                 binding.root.setOnLongClickListener {
                     onLongPress(item)
                     true
@@ -128,7 +140,7 @@ class GalleryGridAdapter(
                     binding.root.setOnClickListener { onSelectionToggle(item) }
                     binding.root.setOnLongClickListener(null)
                 } else {
-                    binding.root.setOnClickListener { onItemClick(item) }
+                    binding.root.setOnClickListener { onItemClick(item, binding.thumbnail) }
                     binding.root.setOnLongClickListener {
                         onLongPress(item)
                         true

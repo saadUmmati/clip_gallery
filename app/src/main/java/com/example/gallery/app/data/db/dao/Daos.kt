@@ -9,6 +9,7 @@ import com.example.gallery.app.data.db.entities.FolderInfo
 import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.data.db.entities.RecycleBinEntity
 import com.example.gallery.app.data.db.entities.TimelineItem
+import com.example.gallery.app.data.db.entities.UriFolder
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -86,6 +87,9 @@ interface MediaItemDao {
     @Query("SELECT * FROM media_items WHERE embeddingProcessed = 0 AND isInRecycleBin = 0 LIMIT :batchSize")
     suspend fun getUnprocessedBatch(batchSize: Int = 50): List<MediaItemEntity>
 
+    @Query("SELECT COUNT(*) FROM media_items WHERE embeddingProcessed = 0 AND isInRecycleBin = 0")
+    suspend fun getUnprocessedCount(): Int
+
     // Vault queries
     @Query("SELECT * FROM media_items WHERE isInVault = 1 AND isInRecycleBin = 0 ORDER BY dateAdded DESC")
     fun getAllVaultItems(): Flow<List<MediaItemEntity>>
@@ -95,6 +99,12 @@ interface MediaItemDao {
 
     @Query("UPDATE media_items SET isInVault = 0 WHERE uri IN (:uris)")
     suspend fun restoreFromVault(uris: List<String>)
+
+    @Query("UPDATE media_items SET clusterId = NULL, isBestShot = 0 WHERE uri IN (:uris)")
+    suspend fun removeFromCluster(uris: List<String>)
+
+    @Query("UPDATE media_items SET clusterId = NULL, isBestShot = 0 WHERE clusterId = :clusterId")
+    suspend fun removeAllFromCluster(clusterId: Int)
 
     @Query("SELECT COUNT(*) FROM media_items WHERE isInVault = 1")
     fun getVaultCount(): LiveData<Int>
@@ -130,6 +140,18 @@ interface MediaItemDao {
 
     @Query("SELECT uri, folder FROM media_items WHERE uri IN (:uris)")
     suspend fun getFoldersForUris(uris: List<String>): List<UriFolder>
+
+    @Query("SELECT * FROM media_items WHERE uri IN (:uris) AND isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC")
+    fun getMediaByUrisPaging(uris: List<String>): PagingSource<Int, MediaItemEntity>
+
+    @Query("SELECT * FROM media_items WHERE uri IN (:uris) AND folder = :folder AND isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC")
+    fun getMediaByUrisAndFolderPaging(uris: List<String>, folder: String): PagingSource<Int, MediaItemEntity>
+
+    @Query("SELECT uri FROM media_items WHERE folder = :folder AND isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC LIMIT :limit")
+    suspend fun getPreviewUrisForFolder(folder: String, limit: Int = 4): List<String>
+
+    @Query("SELECT * FROM media_items WHERE folder = :folder AND isInRecycleBin = 0 AND isInVault = 0 ORDER BY dateAdded DESC LIMIT :limit")
+    suspend fun getMediaByFolderLimit(folder: String, limit: Int = 4): List<MediaItemEntity>
 }
 
 @Dao
@@ -159,6 +181,15 @@ interface ClusterDao {
     @Query("DELETE FROM clusters")
     suspend fun clearAll()
 
+    @Query("SELECT * FROM clusters ORDER BY id ASC")
+    suspend fun getAllClustersList(): List<ClusterEntity>
+
+    @Query("SELECT MAX(id) FROM clusters")
+    suspend fun getMaxClusterId(): Int?
+
+    @Query("DELETE FROM clusters WHERE id = :id")
+    suspend fun deleteById(id: Int)
+
     @Transaction
     suspend fun replaceAll(clusters: List<ClusterEntity>) {
         clearAll()
@@ -167,6 +198,16 @@ interface ClusterDao {
 
     @Query("UPDATE clusters SET memberCount = :count, blurryCount = :blurryCount WHERE id = :id")
     suspend fun updateCounts(id: Int, count: Int, blurryCount: Int)
+
+    @Query("""
+        UPDATE clusters SET
+            memberCount = (SELECT COUNT(*) FROM media_items m WHERE m.clusterId = clusters.id AND m.isInRecycleBin = 0),
+            blurryCount = (SELECT COUNT(*) FROM media_items m WHERE m.clusterId = clusters.id AND m.isBlurry = 1 AND m.isInRecycleBin = 0)
+    """)
+    suspend fun recalculateAllCounts()
+
+    @Query("DELETE FROM clusters WHERE id NOT IN (SELECT DISTINCT clusterId FROM media_items WHERE clusterId IS NOT NULL AND isInRecycleBin = 0)")
+    suspend fun deleteOrphanedClusters()
 }
 
 @Dao

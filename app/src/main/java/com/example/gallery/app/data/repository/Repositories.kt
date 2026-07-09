@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.paging.Pager
@@ -76,6 +77,9 @@ class MediaRepository @Inject constructor(
     // Folder/Album methods
     fun getAllFolders(): Flow<List<FolderInfo>> = mediaItemDao.getAllFolders()
 
+    suspend fun getPreviewUrisForFolder(folder: String, limit: Int = 4): List<String> =
+        mediaItemDao.getPreviewUrisForFolder(folder, limit)
+
     fun getMediaByFolder(folder: String): Flow<List<MediaItemEntity>> =
         mediaItemDao.getMediaByFolder(folder)
 
@@ -97,6 +101,26 @@ class MediaRepository @Inject constructor(
             initialLoadSize = 120
         ),
         pagingSourceFactory = { mediaItemDao.searchMediaByFolderPaging(query, folder) }
+    ).flow
+
+    fun getMediaByUrisPaged(uris: List<String>): Flow<PagingData<MediaItemEntity>> = Pager(
+        config = PagingConfig(
+            pageSize = 60,
+            prefetchDistance = 30,
+            enablePlaceholders = true,
+            initialLoadSize = 120
+        ),
+        pagingSourceFactory = { mediaItemDao.getMediaByUrisPaging(uris) }
+    ).flow
+
+    fun getMediaByUrisAndFolderPaged(uris: List<String>, folder: String): Flow<PagingData<MediaItemEntity>> = Pager(
+        config = PagingConfig(
+            pageSize = 60,
+            prefetchDistance = 30,
+            enablePlaceholders = true,
+            initialLoadSize = 120
+        ),
+        pagingSourceFactory = { mediaItemDao.getMediaByUrisAndFolderPaging(uris, folder) }
     ).flow
 
     fun getFolderCount(folder: String) = mediaItemDao.getFolderCount(folder)
@@ -145,6 +169,9 @@ class MediaRepository @Inject constructor(
 
     suspend fun getUnprocessedBatch(size: Int = 50) =
         mediaItemDao.getUnprocessedBatch(size)
+
+    suspend fun getUnprocessedCount() =
+        mediaItemDao.getUnprocessedCount()
 
     suspend fun updateAiResults(
         uri: String,
@@ -209,9 +236,12 @@ class MediaRepository @Inject constructor(
 
 @Singleton
 class ClusterRepository @Inject constructor(
-    private val clusterDao: ClusterDao
+    private val clusterDao: ClusterDao,
+    private val mediaItemDao: MediaItemDao
 ) {
     fun getAllClusters(): Flow<List<ClusterEntity>> = clusterDao.getAllClusters()
+
+    suspend fun refreshClusterCounts() { clusterDao.recalculateAllCounts() }
 
     fun getClusterCount() = clusterDao.getClusterCount()
 
@@ -220,32 +250,185 @@ class ClusterRepository @Inject constructor(
     suspend fun getClusterPreviewUris(clusterId: Int, limit: Int = 4): List<String> =
         clusterDao.getClusterPreviewUris(clusterId, limit)
 
-    suspend fun saveClusterResults(results: List<ClusterEngine.ClusterResult>) {
-        // Group by folder to generate folder-based labels
-        val folderCounts = mutableMapOf<String, Int>()
+    suspend fun renameCluster(clusterId: Int, newLabel: String) {
+        val cluster = clusterDao.getById(clusterId) ?: return
+        clusterDao.update(cluster.copy(label = newLabel))
+    }
 
-        val entities = results.map { r ->
-            val folder = r.folder
-            val count = folderCounts.getOrPut(folder) { 0 } + 1
-            folderCounts[folder] = count
+    suspend fun removeFromCluster(uris: List<String>, clusterId: Int) {
+        if (uris.isEmpty()) return
+        mediaItemDao.removeFromCluster(uris)
+        val cluster = clusterDao.getById(clusterId) ?: return
+        val newCount = maxOf(0, cluster.memberCount - uris.size)
+        if (newCount <= 0) clusterDao.deleteById(clusterId)
+        else clusterDao.updateCounts(clusterId, newCount, cluster.blurryCount)
+    }
 
-            val label = if (results.count { it.folder == folder } == 1) {
-                // Single cluster in this folder — just use folder name
-                folder
-            } else {
-                // Multiple clusters in same folder — add number
-                "$folder ($count)"
+    suspend fun removeEntireCluster(clusterId: Int) {
+        mediaItemDao.removeAllFromCluster(clusterId)
+        clusterDao.deleteById(clusterId)
+    }
+
+    suspend fun cleanupOrphanedClusters() {
+        clusterDao.deleteOrphanedClusters()
+    }
+
+    /**
+     * FIX: saveClusterResults now ALWAYS computes and stores the centroid.
+     * Previously centroidEmbedding was always null here, which broke
+     * incremental clustering — matchToExistingClusters got zero centroids
+     * and treated every image as unmatched on every subsequent run.
+     */
+    suspend fun saveClusterResults(
+        results: List<ClusterEngine.ClusterResult>,
+        embeddings: Map<String, FloatArray> = emptyMap(),
+        clusterEngine: ClusterEngine? = null
+    ) {
+        val maxId = clusterDao.getMaxClusterId() ?: 0
+        var nextId = maxId + 1
+
+        for (result in results) {
+            if (result.memberUris.isEmpty()) continue
+
+            // Compute centroid from member embeddings if available
+            val centroidBytes = if (clusterEngine != null && embeddings.isNotEmpty()) {
+                val memberEmbeddings = result.memberUris.mapNotNull { embeddings[it] }
+                if (memberEmbeddings.isNotEmpty()) {
+                    clusterEngine.bytesFromFloatArray(
+                        clusterEngine.computeCentroid(memberEmbeddings)
+                    )
+                } else null
+            } else null
+
+            val entity = ClusterEntity(
+                id = nextId,
+                label = "Cluster $nextId",
+                bestShotUri = result.bestShotUri,
+                memberCount = result.memberUris.size,
+                blurryCount = result.blurryUris.size,
+                centroidEmbedding = centroidBytes   // ← FIXED: no longer always null
+            )
+            clusterDao.insert(entity)
+            nextId++
+        }
+    }
+
+    /**
+     * Incremental clustering: match new images to existing clusters by centroid similarity.
+     * Unmatched images → grouped into new clusters via ClusterEngine.
+     * Existing clusters are never deleted.
+     */
+    suspend fun saveIncrementalResults(
+        newEmbeddings: Map<String, FloatArray>,
+        sharpness: Map<String, Float>,
+        clusterEngine: ClusterEngine
+    ) {
+        if (newEmbeddings.isEmpty()) return
+
+        val existingClusters = clusterDao.getAllClustersList()
+
+        // FIX: Log how many clusters have valid centroids for debugging
+        val clustersWithCentroids = existingClusters.filter { it.centroidEmbedding != null }
+        Log.d("ClusterRepository",
+            "Existing clusters: ${existingClusters.size}, " +
+                    "with centroids: ${clustersWithCentroids.size}, " +
+                    "new images to process: ${newEmbeddings.size}")
+
+        val centroids = clustersWithCentroids
+            .map { it.id to clusterEngine.floatArrayFromBytes(it.centroidEmbedding!!) }
+
+        val matchResult = if (centroids.isEmpty()) {
+            // No existing centroids — all images are unmatched, build fresh clusters
+            Log.d("ClusterRepository", "No existing centroids — building fresh clusters")
+            ClusterEngine.MatchResult(
+                assigned = emptyMap(),
+                unmatched = newEmbeddings.toMutableMap()
+            )
+        } else {
+            clusterEngine.matchToExistingClusters(newEmbeddings, centroids)
+        }
+
+        Log.d("ClusterRepository",
+            "Matched: ${matchResult.assigned.values.sumOf { it.size }}, " +
+                    "Unmatched: ${matchResult.unmatched.size}")
+
+        // ── Step 1: Assign matched images to existing clusters ──
+        for ((clusterId, uris) in matchResult.assigned) {
+            val cluster = clusterDao.getById(clusterId) ?: continue
+
+            for (uri in uris) {
+                val score = sharpness[uri]
+                val isBlurry = score != null && score < ClusterEngine.BLUR_THRESHOLD
+                mediaItemDao.updateAiResults(uri, clusterId, false, isBlurry, score)
             }
 
-            ClusterEntity(
-                id           = r.clusterId,
-                label        = label,
-                bestShotUri  = r.bestShotUri,
-                memberCount  = r.memberUris.size,
-                blurryCount  = r.blurryUris.size
-            )
+            // Update centroid as running average including new members
+            val allMemberEmbeddings = mutableListOf<FloatArray>()
+            val existingCentroid = cluster.centroidEmbedding
+                ?.let { clusterEngine.floatArrayFromBytes(it) }
+            if (existingCentroid != null) allMemberEmbeddings.add(existingCentroid)
+            uris.mapNotNull { newEmbeddings[it] }.forEach { allMemberEmbeddings.add(it) }
+
+            val newCentroid = clusterEngine.computeCentroid(allMemberEmbeddings)
+            val newBlurryCount = cluster.blurryCount + uris.count { uri ->
+                val s = sharpness[uri]; s != null && s < ClusterEngine.BLUR_THRESHOLD
+            }
+
+            clusterDao.update(cluster.copy(
+                memberCount = cluster.memberCount + uris.size,
+                blurryCount = newBlurryCount,
+                centroidEmbedding = clusterEngine.bytesFromFloatArray(newCentroid)
+            ))
         }
-        clusterDao.replaceAll(entities)
+
+        // ── Step 2: Cluster unmatched images into new groups ──
+        if (matchResult.unmatched.isNotEmpty()) {
+            Log.d("ClusterRepository",
+                "Clustering ${matchResult.unmatched.size} unmatched images...")
+
+            val unmatchedSharpness = matchResult.unmatched.keys
+                .associateWith { uri -> sharpness[uri] ?: 0f }
+
+            val newClusterResults = clusterEngine.cluster(
+                matchResult.unmatched,
+                unmatchedSharpness
+            )
+
+            val maxId = clusterDao.getMaxClusterId() ?: 0
+            var nextId = maxId + 1
+
+            for (result in newClusterResults) {
+                if (result.memberUris.isEmpty()) continue
+
+                // Always compute and store centroid for new clusters
+                val memberEmbeddings = result.memberUris.mapNotNull { newEmbeddings[it] }
+                val centroid = if (memberEmbeddings.isNotEmpty())
+                    clusterEngine.computeCentroid(memberEmbeddings) else null
+
+                val entity = ClusterEntity(
+                    id = nextId,
+                    label = "Cluster $nextId",
+                    bestShotUri = result.bestShotUri,
+                    memberCount = result.memberUris.size,
+                    blurryCount = result.blurryUris.size,
+                    centroidEmbedding = centroid
+                        ?.let { clusterEngine.bytesFromFloatArray(it) }  // ← FIXED
+                )
+                clusterDao.insert(entity)
+
+                for (uri in result.memberUris) {
+                    val score = sharpness[uri]
+                    mediaItemDao.updateAiResults(
+                        uri        = uri,
+                        clusterId  = nextId,
+                        isBestShot = uri == result.bestShotUri,
+                        isBlurry   = uri in result.blurryUris,
+                        score      = score
+                    )
+                }
+                nextId++
+            }
+        }
     }
 }
 
@@ -326,7 +509,7 @@ class DeletionRepository @Inject constructor(
                     try {
                         context.contentResolver.delete(uri, null, null)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        Log.e("DeletionRepository", "Failed to delete $uri", e)
                     }
                 }
             }
@@ -346,6 +529,42 @@ class DeletionRepository @Inject constructor(
         val expired = recycleBinDao.getExpired()
         if (expired.isNotEmpty()) {
             requestPermanentDeletion(expired.map { it.uri }, launcher)
+        }
+    }
+
+    suspend fun requestTrash(
+        uris: List<String>,
+        launcher: ActivityResultLauncher<IntentSenderRequest>?
+    ) {
+        if (uris.isEmpty()) return
+        val contentUris = uris.map { Uri.parse(it) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val pendingIntent = MediaStore.createTrashRequest(
+                context.contentResolver,
+                contentUris,
+                true
+            )
+            launcher?.launch(
+                IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+            )
+        }
+    }
+
+    suspend fun requestUntrash(
+        uris: List<String>,
+        launcher: ActivityResultLauncher<IntentSenderRequest>?
+    ) {
+        if (uris.isEmpty()) return
+        val contentUris = uris.map { Uri.parse(it) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val pendingIntent = MediaStore.createTrashRequest(
+                context.contentResolver,
+                contentUris,
+                false
+            )
+            launcher?.launch(
+                IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+            )
         }
     }
 

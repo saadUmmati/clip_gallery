@@ -7,7 +7,11 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ListAdapter
@@ -22,7 +26,10 @@ import com.example.gallery.app.databinding.ItemClusterCardBinding
 import com.example.gallery.app.databinding.ItemGalleryThumbnailBinding
 import com.example.gallery.app.ui.viewer.FullscreenViewerActivity
 import com.example.gallery.app.viewmodel.ClusterDetailViewModel
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 // ──────────────────────────────────────────────────
 // Cluster list adapter (used in OptimizeFragment)
@@ -105,27 +112,53 @@ class ClusterDetailFragment : Fragment() {
 
         val clusterId = arguments?.getInt(ARG_CLUSTER_ID) ?: return
 
-        adapter = ClusterMembersAdapter { item ->
-            val intent = Intent(requireContext(), FullscreenViewerActivity::class.java).apply {
-                putExtra(FullscreenViewerActivity.EXTRA_URI, item.uri)
-                putExtra(FullscreenViewerActivity.EXTRA_CLUSTER_ID, clusterId)
+        adapter = ClusterMembersAdapter(
+            onItemClick = { item ->
+                val intent = Intent(requireContext(), FullscreenViewerActivity::class.java).apply {
+                    putExtra(FullscreenViewerActivity.EXTRA_URI, item.uri)
+                    putExtra(FullscreenViewerActivity.EXTRA_CLUSTER_ID, clusterId)
+                }
+                startActivity(intent)
+            },
+            onLongPress = { item ->
+                viewModel.enterSelectionMode(item.uri)
+            },
+            onSelectionToggle = { item ->
+                viewModel.toggleSelection(item.uri)
             }
-            startActivity(intent)
-        }
+        )
         binding.recyclerMembers.layoutManager = GridLayoutManager(requireContext(), 3)
         binding.recyclerMembers.adapter = adapter
 
         binding.toolbar.setNavigationOnClickListener {
-            requireActivity().supportFragmentManager.popBackStack()
+            if (viewModel.selectionMode.value) {
+                viewModel.clearSelection()
+            } else {
+                requireActivity().supportFragmentManager.popBackStack()
+            }
+        }
+
+        binding.btnRemoveFromCluster.setOnClickListener {
+            val count = viewModel.selectedUris.value.size
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Remove from Cluster")
+                .setMessage("Remove $count photo(s) from this cluster? They won't be deleted, just ungrouped.")
+                .setPositiveButton("Remove") { _, _ ->
+                    viewModel.removeFromCluster()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
 
         viewModel.loadCluster(clusterId)
+        observeViewModel()
+    }
 
+    private fun observeViewModel() {
         viewModel.clusterMembers.observe(viewLifecycleOwner) { members ->
             adapter.submitList(members)
             binding.toolbar.subtitle = getString(R.string.photos_count, members.size)
 
-            // Highlight best shot
             val bestShot = members.firstOrNull { it.isBestShot }
             bestShot?.let { item ->
                 Glide.with(binding.bestShotImage)
@@ -133,6 +166,22 @@ class ClusterDetailFragment : Fragment() {
                     .centerCrop()
                     .into(binding.bestShotImage)
                 binding.bestShotCard.visibility = View.VISIBLE
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.selectionMode.collectLatest { isSelectionMode ->
+                adapter.selectionMode = isSelectionMode
+                binding.selectionBar.visibility = if (isSelectionMode) View.VISIBLE else View.GONE
+                binding.toolbar.title = if (isSelectionMode) "Select photos" else "Cluster"
+                if (!isSelectionMode) adapter.selectedUris = emptySet()
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.selectedUris.collectLatest { uris ->
+                adapter.selectedUris = uris
+                binding.selectedCount.text = "${uris.size} selected"
             }
         }
     }
@@ -147,8 +196,17 @@ class ClusterDetailFragment : Fragment() {
 // Adapter for cluster member grid
 // ──────────────────────────────────────────────────
 class ClusterMembersAdapter(
-    private val onItemClick: (MediaItemEntity) -> Unit = {}
+    private val onItemClick: (MediaItemEntity) -> Unit = {},
+    private val onLongPress: (MediaItemEntity) -> Unit = {},
+    private val onSelectionToggle: (MediaItemEntity) -> Unit = {}
 ) : ListAdapter<MediaItemEntity, ClusterMembersAdapter.ViewHolder>(DiffCallback) {
+
+    var selectionMode = false
+    var selectedUris: Set<String> = emptySet()
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val binding = ItemGalleryThumbnailBinding.inflate(
@@ -178,7 +236,25 @@ class ClusterMembersAdapter(
             binding.overlay.visibility =
                 if (item.isBlurry || item.isBestShot) View.VISIBLE else View.GONE
 
-            binding.root.setOnClickListener { onItemClick(item) }
+            if (selectionMode) {
+                binding.selectionCheck.visibility =
+                    if (item.uri in selectedUris) View.VISIBLE else View.GONE
+                binding.selectionOverlay.visibility =
+                    if (item.uri in selectedUris) View.VISIBLE else View.GONE
+                binding.thumbnail.alpha = if (item.uri in selectedUris) 0.6f else 1.0f
+            } else {
+                binding.selectionCheck.visibility = View.GONE
+                binding.selectionOverlay.visibility = View.GONE
+                binding.thumbnail.alpha = 1.0f
+            }
+
+            binding.root.setOnClickListener {
+                if (selectionMode) onSelectionToggle(item) else onItemClick(item)
+            }
+            binding.root.setOnLongClickListener {
+                if (!selectionMode) onLongPress(item)
+                true
+            }
         }
     }
 

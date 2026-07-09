@@ -21,25 +21,13 @@
             app:titleTextColor="@color/text_primary"
             app:navigationIcon="@drawable/ic_app_logo" />
 
-        <com.google.android.material.tabs.TabLayout
-            android:id="@+id/tabLayout"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:background="@color/surface_dark"
-            app:tabSelectedTextColor="@color/accent_blue"
-            app:tabTextColor="@color/text_secondary"
-            app:tabIndicatorColor="@color/accent_blue"
-            app:tabIndicatorHeight="2dp"
-            app:tabRippleColor="@color/ripple_color"
-            app:tabIconTint="@color/tab_icon_tint"
-            app:tabTextAppearance="@style/TabTextAppearance" />
-
     </com.google.android.material.appbar.AppBarLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
+        android:layout_marginBottom="80dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <!-- Scan progress indicator -->
@@ -63,7 +51,19 @@
         android:id="@+id/nav_host_fragment"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:layout_marginBottom="80dp"
         android:visibility="gone"
         app:layout_behavior="@string/appbar_scrolling_view_behavior" />
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNavigation"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_gravity="bottom"
+        android:background="@color/surface_dark"
+        app:menu="@menu/menu_bottom_nav"
+        app:itemIconTint="@color/tab_icon_tint"
+        app:itemTextColor="@color/tab_icon_tint"
+        app:labelVisibilityMode="labeled" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

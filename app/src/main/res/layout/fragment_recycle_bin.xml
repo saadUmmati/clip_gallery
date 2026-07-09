@@ -41,7 +41,7 @@
         <ImageView
             android:layout_width="72dp"
             android:layout_height="72dp"
-            android:src="@drawable/ic_optimize"
+            android:src="@drawable/ic_delete"
             android:alpha="0.3"
             app:tint="@color/text_secondary"
             android:contentDescription="@string/recycle_bin_empty" />

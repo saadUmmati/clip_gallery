@@ -22,7 +22,7 @@
 
     <!-- Optimize -->
     <string name="run_ai_analysis">Run AI Analysis</string>
-    <string name="run_ai_on_selected">Analyze Selected</string>
+    <string name="run_ai_on_selected">Cluster All</string>
     <string name="ai_running">Analyzing photos…</string>
     <string name="clusters_found">%d clusters found</string>
     <string name="blurry_images">%d blurry images</string>
@@ -112,4 +112,8 @@
     <string name="confirm_vault_move">Move %d file(s) to the secure vault? Files will be encrypted with AES-256.</string>
     <string name="confirm_vault_restore">Restore %d file(s) to the gallery? Files will be decrypted.</string>
     <string name="confirm_vault_delete">Permanently delete %d file(s) from the vault? This cannot be undone.</string>
+    <string name="vault_auth_failed">Authentication failed. Please try again.</string>
+    <string name="share">Share</string>
+    <string name="share_via">Share via</string>
+    <string name="delete">Delete</string>
 </resources>

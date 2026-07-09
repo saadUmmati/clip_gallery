@@ -26,7 +26,7 @@ class AiProcessingWorker @AssistedInject constructor(
     private val embedder: OnnxEmbedder,
     private val sharpness: SharpnessAnalyzer,
     private val clusterEngine: ClusterEngine
-) : CoroutineWorker(applicationContext, params) {
+) : CoroutineWorker(context, params) {
 
     companion object {
         private const val TAG = "AiProcessingWorker"
@@ -39,6 +39,12 @@ class AiProcessingWorker @AssistedInject constructor(
         fun buildRequest(uris: List<String>): OneTimeWorkRequest {
             return OneTimeWorkRequestBuilder<AiProcessingWorker>()
                 .setInputData(workDataOf(KEY_URIS to uris.toTypedArray()))
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .build()
+        }
+
+        fun buildRequestAll(): OneTimeWorkRequest {
+            return OneTimeWorkRequestBuilder<AiProcessingWorker>()
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
         }
@@ -78,178 +84,191 @@ class AiProcessingWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         setForeground(buildForegroundInfo("Initializing AI model…"))
 
+        var onnxAvailable = true
+
         return try {
             try {
                 embedder.initialize()
             } catch (e: IllegalStateException) {
-                return Result.failure(workDataOf("error" to e.message))
+                Log.w(TAG, "ONNX model unavailable, falling back to folder grouping: ${e.message}")
+                onnxAvailable = false
             }
 
             val selectedUris = inputData.getStringArray(KEY_URIS)
-            val isSelective = selectedUris != null && selectedUris.isNotEmpty()
+            val uris = selectedUris?.takeIf { it.isNotEmpty() }
+            val isSelective = uris != null
 
             val processedEmbeddings = mutableMapOf<String, FloatArray>()
             val processedSharpness  = mutableMapOf<String, Float>()
 
-            if (isSelective) {
-                setForeground(buildForegroundInfo("Processing ${selectedUris!!.size} selected images…"))
-                setProgress(workDataOf(
-                    "status" to "Processing ${selectedUris.size} selected images…",
-                    "processed" to 0,
-                    "total" to selectedUris.size
-                ))
+            if (onnxAvailable) {
+                if (isSelective) {
+                    setForeground(buildForegroundInfo("Processing ${uris!!.size} selected images…"))
+                    setProgress(workDataOf(
+                        "status" to "Processing ${uris.size} selected images…",
+                        "processed" to 0,
+                        "total" to uris.size
+                    ))
 
-                var processedCount = 0
-                for (uri in selectedUris) {
-                    if (isStopped) {
-                        return Result.success(workDataOf("status" to "Cancelled", "processed" to processedCount))
-                    }
-
-                    try {
-                        val embedding = embedder.embed(uri)
-                        val score = sharpness.computeSharpness(uri)
-
-                        if (embedding != null) {
-                            processedEmbeddings[uri] = embedding
-                            mediaRepository.storeEmbedding(uri, embedding)
-                            mediaRepository.markProcessed(uri)
+                    var processedCount = 0
+                    for (uri in uris) {
+                        if (isStopped) {
+                            return Result.success(workDataOf("status" to "Cancelled", "processed" to processedCount))
                         }
-                        processedSharpness[uri] = score
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to embed $uri: ${e.message}")
-                    }
 
-                    processedCount++
-                    if (processedCount % 10 == 0 || processedCount == selectedUris.size) {
-                        val status = "Processing $processedCount/${selectedUris.size}…"
-                        setForeground(buildForegroundInfo(status))
-                        setProgress(workDataOf("status" to status, "processed" to processedCount, "total" to selectedUris.size))
-                    }
-                }
-            } else {
-                var batchNum = 0
-                while (true) {
-                    if (isStopped) {
-                        return Result.success(workDataOf("status" to "Cancelled", "processed" to processedEmbeddings.size))
-                    }
-
-                    val batch = mediaRepository.getUnprocessedBatch(BATCH_SIZE)
-                    if (batch.isEmpty()) break
-
-                    batchNum++
-                    val status = "Processing batch $batchNum…"
-                    setForeground(buildForegroundInfo(status))
-                    setProgress(workDataOf("status" to status, "processed" to processedEmbeddings.size))
-
-                    for (item in batch) {
                         try {
-                            val embedding = embedder.embed(item.uri)
-                            val score = sharpness.computeSharpness(item.uri)
+                            val embedding = embedder.embed(uri)
+                            val score = sharpness.computeSharpness(uri)
 
                             if (embedding != null) {
-                                processedEmbeddings[item.uri] = embedding
-                                mediaRepository.storeEmbedding(item.uri, embedding)
-                                mediaRepository.markProcessed(item.uri)
+                                processedEmbeddings[uri] = embedding
+                                mediaRepository.storeEmbedding(uri, embedding)
+                                mediaRepository.markProcessed(uri)
                             }
-                            processedSharpness[item.uri] = score
+                            processedSharpness[uri] = score
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to embed ${item.uri}: ${e.message}")
+                            Log.w(TAG, "Failed to embed $uri: ${e.message}")
+                        }
+
+                        processedCount++
+                        if (processedCount % 10 == 0 || processedCount == uris.size) {
+                            val status = "Processing $processedCount/${uris.size}…"
+                            setProgress(workDataOf("status" to status, "processed" to processedCount, "total" to uris.size))
+                        }
+                    }
+                } else {
+                    val totalCount = mediaRepository.getUnprocessedCount()
+                    var batchNum = 0
+                    setProgress(workDataOf("status" to "Starting…", "processed" to 0, "total" to totalCount))
+                    while (true) {
+                        if (isStopped) {
+                            return Result.success(workDataOf("status" to "Cancelled", "processed" to processedEmbeddings.size))
+                        }
+
+                        val batch = mediaRepository.getUnprocessedBatch(BATCH_SIZE)
+                        if (batch.isEmpty()) break
+
+                        batchNum++
+                        val status = "Processing batch $batchNum…"
+                        setForeground(buildForegroundInfo(status))
+                        setProgress(workDataOf("status" to status, "processed" to processedEmbeddings.size, "total" to totalCount))
+
+                        for (item in batch) {
+                            try {
+                                val embedding = embedder.embed(item.uri)
+                                val score = sharpness.computeSharpness(item.uri)
+
+                                if (embedding != null) {
+                                    processedEmbeddings[item.uri] = embedding
+                                    mediaRepository.storeEmbedding(item.uri, embedding)
+                                    mediaRepository.markProcessed(item.uri)
+                                }
+                                processedSharpness[item.uri] = score
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to embed ${item.uri}: ${e.message}")
+                            }
                         }
                     }
                 }
             }
 
-            // ── Step 2: Cluster PER FOLDER ──
-            setForeground(buildForegroundInfo("Clustering images by folder…"))
-            setProgress(workDataOf("status" to "Clustering images by folder…"))
+            // ── Step 2: Incremental clustering ──
+            if (onnxAvailable && processedEmbeddings.isNotEmpty()) {
+                setForeground(buildForegroundInfo("Matching images to existing clusters…"))
+                setProgress(workDataOf("status" to "Matching images to existing clusters…"))
 
-            // Build COMPLETE folder map for ALL images with embeddings (new + existing)
-            // This is critical — we need folder info for every embedding, not just newly processed ones
-            val allEmbeddings = mutableMapOf<String, FloatArray>()
-            val allSharpness  = mutableMapOf<String, Float>()
+                clusterRepository.saveIncrementalResults(
+                    processedEmbeddings, processedSharpness, clusterEngine
+                )
 
-            if (isSelective) {
-                // Load ALL existing embeddings + folder info from DB
-                val existingEmbeddings = mediaRepository.getAllProcessedEmbeddings()
-                allEmbeddings.putAll(existingEmbeddings)
-                allEmbeddings.putAll(processedEmbeddings)
+                // Recalculate accurate counts from actual media items
+                clusterRepository.refreshClusterCounts()
 
-                // Load ALL existing sharpness from DB (we don't have it, use 0 as placeholder)
-                for (uri in existingEmbeddings.keys) {
-                    if (uri !in processedSharpness) {
-                        allSharpness[uri] = 0f
+                // Clean up any empty/orphaned clusters
+                clusterRepository.cleanupOrphanedClusters()
+
+                val processedCount = processedEmbeddings.size
+                Log.i(TAG, "Done: $processedCount images processed incrementally")
+
+                Result.success(workDataOf(
+                    "status" to "Done",
+                    "clusters" to 0,
+                    "processed" to processedCount,
+                    "folders" to 0
+                ))
+            } else {
+                // Fallback path: group selected images by folder (no AI needed)
+                val urisToGroup = if (isSelective) uris!!.toList() else emptyList()
+
+                if (urisToGroup.isEmpty()) {
+                    return Result.success(workDataOf(
+                        "status" to "Done",
+                        "clusters" to 0,
+                        "processed" to 0,
+                        "folders" to 0
+                    ))
+                }
+
+                setForeground(buildForegroundInfo("Grouping ${urisToGroup.size} images by folder…"))
+
+                val uriFolders = mediaRepository.getFoldersForUris(urisToGroup)
+                val folderToUris = mutableMapOf<String, MutableList<String>>()
+                for (uri in urisToGroup) {
+                    val folder = uriFolders[uri] ?: "Unknown"
+                    folderToUris.getOrPut(folder) { mutableListOf() }.add(uri)
+                }
+
+                val allClusterResults = mutableListOf<ClusterEngine.ClusterResult>()
+                var globalClusterOffset = 0
+
+                for ((folder, folderUris) in folderToUris) {
+                    val result = ClusterEngine.ClusterResult(
+                        clusterId  = globalClusterOffset,
+                        memberUris = folderUris,
+                        bestShotUri = folderUris.first(),
+                        blurryUris = emptyList(),
+                        folder     = folder
+                    )
+                    allClusterResults.add(result)
+                    globalClusterOffset++
+
+                    Log.d(TAG, "Folder '$folder': ${folderUris.size} images → 1 group")
+                }
+
+                setForeground(buildForegroundInfo("Saving ${allClusterResults.size} groups…"))
+                setProgress(workDataOf("status" to "Saving ${allClusterResults.size} groups…"))
+
+                clusterRepository.saveClusterResults(allClusterResults, processedEmbeddings, clusterEngine)
+
+
+                // Recalculate accurate counts from actual media items
+                clusterRepository.refreshClusterCounts()
+
+                // Clean up any empty/orphaned clusters
+                clusterRepository.cleanupOrphanedClusters()
+
+                for (result in allClusterResults) {
+                    for (uri in result.memberUris) {
+                        mediaRepository.updateAiResults(
+                            uri        = uri,
+                            clusterId  = result.clusterId,
+                            isBestShot = false,
+                            isBlurry   = false,
+                            score      = null
+                        )
                     }
                 }
-                allSharpness.putAll(processedSharpness)
-            } else {
-                allEmbeddings.putAll(processedEmbeddings)
-                allSharpness.putAll(processedSharpness)
+
+                val folderCount = folderToUris.size
+                Log.i(TAG, "Fallback: ${urisToGroup.size} images → ${allClusterResults.size} folder groups")
+
+                Result.success(workDataOf(
+                    "status" to "Done",
+                    "clusters" to allClusterResults.size,
+                    "processed" to urisToGroup.size,
+                    "folders" to folderCount
+                ))
             }
-
-            // Load folder info for EVERY embedding from DB (single query)
-            val uriToFolders = mediaRepository.getFoldersForUris(allEmbeddings.keys.toList())
-            Log.d(TAG, "Loaded folder info for ${uriToFolders.size}/${allEmbeddings.size} URIs")
-
-            // Group embeddings by folder
-            val folderEmbeddings = mutableMapOf<String, MutableMap<String, FloatArray>>()
-            val folderSharpness  = mutableMapOf<String, MutableMap<String, Float>>()
-
-            for ((uri, embedding) in allEmbeddings) {
-                val folder = uriToFolders[uri] ?: "Unknown"
-                folderEmbeddings.getOrPut(folder) { mutableMapOf() }[uri] = embedding
-                val score = allSharpness[uri]
-                if (score != null) {
-                    folderSharpness.getOrPut(folder) { mutableMapOf() }[uri] = score
-                }
-            }
-
-            Log.d(TAG, "Folders with embeddings: ${folderEmbeddings.keys}")
-
-            // Cluster within each folder
-            val allClusterResults = mutableListOf<ClusterEngine.ClusterResult>()
-            var globalClusterOffset = 0
-
-            for ((folder, embeddings) in folderEmbeddings) {
-                val folderSharp = folderSharpness[folder] ?: emptyMap()
-                val folderResults = clusterEngine.cluster(embeddings, folderSharp)
-
-                val offsetResults = folderResults.map { result ->
-                    result.copy(clusterId = result.clusterId + globalClusterOffset, folder = folder)
-                }
-                allClusterResults.addAll(offsetResults)
-                globalClusterOffset += folderResults.size
-
-                Log.d(TAG, "Folder '$folder': ${embeddings.size} images → ${folderResults.size} clusters")
-            }
-
-            setForeground(buildForegroundInfo("Saving results…"))
-            setProgress(workDataOf("status" to "Saving ${allClusterResults.size} albums…"))
-
-            Log.i(TAG, "Saving ${allClusterResults.size} clusters")
-            clusterRepository.saveClusterResults(allClusterResults)
-
-            for (result in allClusterResults) {
-                for (uri in result.memberUris) {
-                    mediaRepository.updateAiResults(
-                        uri        = uri,
-                        clusterId  = result.clusterId,
-                        isBestShot = (uri == result.bestShotUri),
-                        isBlurry   = (uri in result.blurryUris),
-                        score      = allSharpness[uri]
-                    )
-                }
-            }
-
-            val processedCount = if (isSelective) selectedUris!!.size else processedEmbeddings.size
-            val folderCount = folderEmbeddings.size
-            Log.i(TAG, "Done: $processedCount images across $folderCount folders → ${allClusterResults.size} clusters")
-
-            Result.success(workDataOf(
-                "status" to "Done",
-                "clusters" to allClusterResults.size,
-                "processed" to processedCount,
-                "folders" to folderCount
-            ))
         } catch (e: Exception) {
             Log.e(TAG, "AI processing failed", e)
             Result.failure(workDataOf("error" to e.message))

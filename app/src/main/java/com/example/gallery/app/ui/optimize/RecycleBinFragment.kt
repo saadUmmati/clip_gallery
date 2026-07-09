@@ -26,6 +26,7 @@ class RecycleBinFragment : Fragment() {
     private val viewModel: OptimizeViewModel by activityViewModels()
     private lateinit var adapter: SimpleGalleryGridAdapter
     private var pendingDeletionUris: List<String> = emptyList()
+    private var pendingRestoreUris: List<String> = emptyList()
 
     private val deleteRequestLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -35,6 +36,15 @@ class RecycleBinFragment : Fragment() {
                 viewModel.confirmDeletion(pendingDeletionUris)
                 pendingDeletionUris = emptyList()
             }
+        }
+    }
+
+    private val restoreRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            viewModel.undoRecycleBin(pendingRestoreUris)
+            pendingRestoreUris = emptyList()
         }
     }
 
@@ -61,7 +71,15 @@ class RecycleBinFragment : Fragment() {
                 R.id.action_restore_all -> {
                     val items = viewModel.recycleBinItems.value ?: emptyList()
                     if (items.isNotEmpty()) {
-                        viewModel.undoRecycleBin(items.map { it.uri })
+                        val uris = items.map { it.uri }
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                            pendingRestoreUris = uris
+                            lifecycleScope.launch {
+                                viewModel.requestUntrash(uris, restoreRequestLauncher)
+                            }
+                        } else {
+                            viewModel.undoRecycleBin(uris)
+                        }
                     }
                     true
                 }

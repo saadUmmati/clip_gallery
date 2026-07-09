@@ -5,24 +5,33 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
-import androidx.fragment.app.viewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
 import androidx.work.WorkManager
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.example.gallery.app.R
+import com.example.gallery.app.data.db.entities.ClusterEntity
 import com.example.gallery.app.databinding.FragmentOptimizeBinding
-import com.example.gallery.app.ui.cluster.ClusterListAdapter
+import com.example.gallery.app.databinding.ItemAlbumCardBinding
+import com.example.gallery.app.ui.cluster.ClusterDetailFragment
 import com.example.gallery.app.util.formatFileSize
 import com.example.gallery.app.viewmodel.AIViewModel
 import com.example.gallery.app.viewmodel.OptimizeViewModel
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import javax.inject.Inject
+import kotlinx.coroutines.withContext
 
 @AndroidEntryPoint
 class OptimizeFragment : Fragment() {
@@ -33,10 +42,12 @@ class OptimizeFragment : Fragment() {
     private val optimizeViewModel: OptimizeViewModel by activityViewModels()
     private val aiViewModel: AIViewModel by activityViewModels()
 
-    private lateinit var clusterAdapter: ClusterListAdapter
+    private lateinit var clusterAdapter: ClusterAlbumAdapter
     private lateinit var blurryAdapter: BlurryImagesAdapter
 
     private var pendingDeletionUris: List<String> = emptyList()
+    private var pendingTrashUris: List<String> = emptyList()
+    private var pendingRestoreUris: List<String> = emptyList()
 
     private val deleteRequestLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -49,6 +60,25 @@ class OptimizeFragment : Fragment() {
         }
     }
 
+    private val trashRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val allMedia = optimizeViewModel.allMedia.value ?: emptyList()
+            optimizeViewModel.moveSelectedToRecycleBin(allMedia, pendingTrashUris)
+            pendingTrashUris = emptyList()
+        }
+    }
+
+    private val restoreRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            optimizeViewModel.undoRecycleBin(pendingRestoreUris)
+            pendingRestoreUris = emptyList()
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
@@ -58,25 +88,67 @@ class OptimizeFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        setupClusterList()
+        setupClusterGrid()
         setupBlurryList()
         setupButtons()
         observeViewModel()
     }
 
-    private fun setupClusterList() {
-        clusterAdapter = ClusterListAdapter(
-            onClusterClick = { cluster ->
-                val fragment = com.example.gallery.app.ui.cluster.ClusterDetailFragment.newInstance(cluster.id)
+    private fun setupClusterGrid() {
+        clusterAdapter = ClusterAlbumAdapter(
+            onAlbumClick = { cluster ->
+                val fragment = ClusterDetailFragment.newInstance(cluster.id)
                 val container = requireActivity().findViewById<android.widget.FrameLayout>(R.id.nav_host_fragment)
                 container.visibility = View.VISIBLE
                 requireActivity().supportFragmentManager.beginTransaction()
                     .replace(R.id.nav_host_fragment, fragment)
                     .addToBackStack(null)
                     .commit()
+            },
+            onAlbumLongClick = { cluster ->
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(cluster.label)
+                    .setItems(arrayOf("Rename", "Delete Cluster")) { _, which ->
+                        when (which) {
+                            0 -> showRenameDialog(cluster)
+                            1 -> {
+                                MaterialAlertDialogBuilder(requireContext())
+                                    .setTitle("Delete Cluster")
+                                    .setMessage("Remove ${cluster.memberCount} images from this cluster? Images won't be deleted.")
+                                    .setPositiveButton("Delete") { _, _ ->
+                                        optimizeViewModel.deleteCluster(cluster.id)
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .show()
+                            }
+                        }
+                    }
+                    .show()
             }
         )
-        binding.recyclerClusters.adapter = clusterAdapter
+        binding.recyclerClusters.apply {
+            layoutManager = GridLayoutManager(requireContext(), 2)
+            adapter = clusterAdapter
+        }
+    }
+
+    private fun showRenameDialog(cluster: ClusterEntity) {
+        val editText = android.widget.EditText(requireContext()).apply {
+            setText(cluster.label)
+            setSelectAllOnFocus(true)
+            setPadding(48, 32, 48, 16)
+        }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Rename Cluster")
+            .setView(editText)
+            .setPositiveButton("Save") { _, _ ->
+                val newName = editText.text.toString().trim()
+                if (newName.isNotBlank()) {
+                    optimizeViewModel.renameCluster(cluster.id, newName)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun setupBlurryList() {
@@ -90,17 +162,31 @@ class OptimizeFragment : Fragment() {
 
     private fun setupButtons() {
         binding.btnRunAi.setOnClickListener {
-            val selected = optimizeViewModel.selectedUris.value
-            if (selected.isEmpty()) {
-                Snackbar.make(binding.root, "Select photos in the Gallery tab first, then tap Send to AI", Snackbar.LENGTH_LONG).show()
-                (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.switchToGalleryTab()
-                return@setOnClickListener
+            val currentState = aiViewModel.processingState.value
+            if (currentState is AIViewModel.AiState.Running) {
+                aiViewModel.cancelProcessing(WorkManager.getInstance(requireContext().applicationContext))
+            } else {
+                val selected = optimizeViewModel.selectedUris.value
+                if (selected.isNotEmpty()) {
+                    aiViewModel.startProcessing(
+                        WorkManager.getInstance(requireContext().applicationContext),
+                        selected.toList()
+                    )
+                    optimizeViewModel.clearSelection()
+                } else {
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setTitle("Cluster All Images")
+                        .setMessage("Process all gallery images with AI? This may take a while depending on your library size.")
+                        .setPositiveButton("Start") { _, _ ->
+                            (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.checkPermissionsAndScan()
+                            aiViewModel.startProcessingAll(
+                                WorkManager.getInstance(requireContext().applicationContext)
+                            )
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
             }
-            aiViewModel.startProcessing(
-                WorkManager.getInstance(requireContext().applicationContext),
-                selected.toList()
-            )
-            optimizeViewModel.clearSelection()
         }
 
         binding.btnSelectAllBlurry.setOnClickListener {
@@ -110,18 +196,17 @@ class OptimizeFragment : Fragment() {
         }
 
         binding.btnSelectDuplicates.setOnClickListener {
-            val clusters = optimizeViewModel.allClusters.value ?: return@setOnClickListener
             val allMedia = optimizeViewModel.allMedia.value ?: return@setOnClickListener
-            optimizeViewModel.selectDuplicates(clusters, allMedia)
+            optimizeViewModel.selectDuplicates(allMedia)
         }
 
         binding.btnMoveToRecycleBin.setOnClickListener {
-            val selected = optimizeViewModel.selectedUris.value
+            val selected = optimizeViewModel.selectedUris.value.toList()
             if (selected.isEmpty()) {
                 Snackbar.make(binding.root, getString(R.string.no_images_selected), Snackbar.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            showConfirmDialog(selected.size)
+            showConfirmDialog(selected)
         }
 
         binding.btnViewRecycleBin.setOnClickListener {
@@ -135,13 +220,20 @@ class OptimizeFragment : Fragment() {
         }
     }
 
-    private fun showConfirmDialog(count: Int) {
+    private fun showConfirmDialog(uris: List<String>) {
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(getString(R.string.confirm_move_title))
-            .setMessage(getString(R.string.confirm_move_message, count))
+            .setMessage(getString(R.string.confirm_move_message, uris.size))
             .setPositiveButton(getString(R.string.move_confirm)) { _, _ ->
-                val allMedia = optimizeViewModel.allMedia.value ?: emptyList()
-                optimizeViewModel.moveSelectedToRecycleBin(allMedia)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    pendingTrashUris = uris
+                    lifecycleScope.launch {
+                        optimizeViewModel.requestTrash(uris, trashRequestLauncher)
+                    }
+                } else {
+                    val allMedia = optimizeViewModel.allMedia.value ?: emptyList()
+                    optimizeViewModel.moveSelectedToRecycleBin(allMedia, uris)
+                }
             }
             .setNegativeButton(getString(R.string.cancel), null)
             .show()
@@ -149,10 +241,21 @@ class OptimizeFragment : Fragment() {
 
     private fun observeViewModel() {
         optimizeViewModel.allClusters.observe(viewLifecycleOwner) { clusters ->
-            clusterAdapter.submitList(clusters)
-            binding.clusterCount.text = getString(R.string.clusters_found_count, clusters.size)
+            binding.clusterCount.text = "${clusters.size} AI groups found"
             binding.clusterSection.visibility =
                 if (clusters.isEmpty()) View.GONE else View.VISIBLE
+
+            viewLifecycleOwner.lifecycleScope.launch {
+                val albums = withContext(Dispatchers.IO) {
+                    clusters.map { cluster ->
+                        val previewUris = optimizeViewModel.getClusterPreviewUris(cluster.id)
+                        ClusterDisplay(cluster, previewUris)
+                    }
+                }
+                if (_binding != null) {
+                    clusterAdapter.submitList(albums)
+                }
+            }
         }
 
         optimizeViewModel.blurryImages.observe(viewLifecycleOwner) { items ->
@@ -168,7 +271,6 @@ class OptimizeFragment : Fragment() {
             }
         }
 
-        // Quality breakdown
         optimizeViewModel.allMedia.observe(viewLifecycleOwner) { allItems ->
             val total = allItems.size
             if (total == 0) return@observe
@@ -215,25 +317,37 @@ class OptimizeFragment : Fragment() {
                     is AIViewModel.AiState.Running -> {
                         binding.aiProgressBar.visibility = View.VISIBLE
                         binding.aiStatusText.visibility = View.VISIBLE
-                        binding.aiStatusText.text = state.status
-                        binding.btnRunAi.isEnabled = false
+                        if (state.total > 0) {
+                            binding.aiProgressBar.isIndeterminate = false
+                            binding.aiProgressBar.max = state.total
+                            binding.aiProgressBar.progress = state.processed
+                            binding.aiStatusText.text = "${state.processed}/${state.total} — ${state.status}"
+                        } else {
+                            binding.aiProgressBar.isIndeterminate = true
+                            binding.aiStatusText.text = state.status
+                        }
+                        binding.btnRunAi.text = "Cancel"
+                        binding.btnRunAi.setBackgroundColor(androidx.core.content.ContextCompat.getColor(requireContext(), R.color.danger_red))
                     }
                     is AIViewModel.AiState.Done -> {
                         binding.aiProgressBar.visibility = View.GONE
                         binding.aiStatusText.visibility = View.VISIBLE
-                        binding.aiStatusText.text = getString(R.string.clusters_found_count, state.clusters)
-                        binding.btnRunAi.isEnabled = true
+                        binding.aiStatusText.text = "${state.clusters} AI groups created"
+                        binding.btnRunAi.text = getString(R.string.run_ai_on_selected)
+                        binding.btnRunAi.setBackgroundColor(androidx.core.content.ContextCompat.getColor(requireContext(), R.color.accent_blue))
                     }
                     is AIViewModel.AiState.Error -> {
                         binding.aiProgressBar.visibility = View.GONE
                         binding.aiStatusText.visibility = View.VISIBLE
                         binding.aiStatusText.text = getString(R.string.ai_error_prefix, state.message)
-                        binding.btnRunAi.isEnabled = true
+                        binding.btnRunAi.text = getString(R.string.run_ai_on_selected)
+                        binding.btnRunAi.setBackgroundColor(androidx.core.content.ContextCompat.getColor(requireContext(), R.color.accent_blue))
                     }
                     else -> {
                         binding.aiProgressBar.visibility = View.GONE
                         binding.aiStatusText.visibility = View.GONE
-                        binding.btnRunAi.isEnabled = true
+                        binding.btnRunAi.text = getString(R.string.run_ai_on_selected)
+                        binding.btnRunAi.setBackgroundColor(androidx.core.content.ContextCompat.getColor(requireContext(), R.color.accent_blue))
                     }
                 }
             }
@@ -244,9 +358,16 @@ class OptimizeFragment : Fragment() {
         Snackbar.make(
             binding.root,
             getString(R.string.moved_to_bin, uris.size),
-            5000 // 5 seconds
+            5000
         ).setAction(getString(R.string.undo)) {
-            optimizeViewModel.undoRecycleBin(uris)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                pendingRestoreUris = uris
+                lifecycleScope.launch {
+                    optimizeViewModel.requestUntrash(uris, restoreRequestLauncher)
+                }
+            } else {
+                optimizeViewModel.undoRecycleBin(uris)
+            }
         }.addCallback(object : Snackbar.Callback() {
             override fun onDismissed(snackbar: Snackbar, event: Int) {
                 if (event != DISMISS_EVENT_ACTION) {
@@ -259,5 +380,66 @@ class OptimizeFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+}
+
+data class ClusterDisplay(
+    val cluster: ClusterEntity,
+    val previewUris: List<String>
+)
+
+class ClusterAlbumAdapter(
+    private val onAlbumClick: (ClusterEntity) -> Unit,
+    private val onAlbumLongClick: (ClusterEntity) -> Unit
+) : ListAdapter<ClusterDisplay, ClusterAlbumAdapter.ViewHolder>(DiffCallback) {
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val binding = ItemAlbumCardBinding.inflate(
+            LayoutInflater.from(parent.context), parent, false
+        )
+        return ViewHolder(binding)
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        holder.bind(getItem(position))
+    }
+
+    inner class ViewHolder(
+        private val binding: ItemAlbumCardBinding
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        fun bind(album: ClusterDisplay) {
+            binding.albumName.text = album.cluster.label
+            binding.albumCount.text = "${album.cluster.memberCount} photos"
+
+            val imageViews = listOf(
+                binding.gridTopLeft, binding.gridTopRight,
+                binding.gridBottomLeft, binding.gridBottomRight
+            )
+
+            for (i in imageViews.indices) {
+                val iv = imageViews[i]
+                if (i < album.previewUris.size) {
+                    iv.visibility = View.VISIBLE
+                    Glide.with(iv)
+                        .load(album.previewUris[i])
+                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+                        .centerCrop()
+                        .placeholder(R.drawable.placeholder_image)
+                        .into(iv)
+                } else {
+                    iv.visibility = View.GONE
+                }
+            }
+
+            binding.root.setOnClickListener { onAlbumClick(album.cluster) }
+            binding.root.setOnLongClickListener { onAlbumLongClick(album.cluster); true }
+        }
+    }
+
+    companion object DiffCallback : DiffUtil.ItemCallback<ClusterDisplay>() {
+        override fun areItemsTheSame(old: ClusterDisplay, new: ClusterDisplay) =
+            old.cluster.id == new.cluster.id
+        override fun areContentsTheSame(old: ClusterDisplay, new: ClusterDisplay) = old == new
     }
 }

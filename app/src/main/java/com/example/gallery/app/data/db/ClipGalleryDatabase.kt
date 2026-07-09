@@ -18,7 +18,7 @@ import com.example.gallery.app.data.db.entities.RecycleBinEntity
         ClusterEntity::class,
         RecycleBinEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class ClipGalleryDatabase : RoomDatabase() {
@@ -42,6 +42,19 @@ abstract class ClipGalleryDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE media_items ADD COLUMN folder TEXT NOT NULL DEFAULT 'Unknown'")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Version 5: no structural changes — this migration prevents
+                // fallbackToDestructiveMigration() from wiping embeddings on upgrade.
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE clusters ADD COLUMN centroidEmbedding BLOB DEFAULT NULL")
             }
         }
     }

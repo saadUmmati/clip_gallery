@@ -28,7 +28,7 @@ data class MediaItemEntity(
     val isBlurry: Boolean = false,      // Below sharpness threshold
     val embeddingProcessed: Boolean = false,
 
-    // 512-dim CLIP embedding stored as raw float bytes (4 bytes × 512 = 2048 bytes)
+    // 384-dim DINOv2 embedding stored as raw float bytes (4 bytes × 384 = 1536 bytes)
     @ColumnInfo(typeAffinity = ColumnInfo.BLOB)
     val embedding: ByteArray? = null,
 
@@ -84,12 +84,28 @@ data class MediaItemEntity(
 data class ClusterEntity(
     @PrimaryKey
     val id: Int = 0,
-    val label: String,                  // Human-readable cluster concept
-    val bestShotUri: String?,           // URI of highest sharpness image
+    val label: String,
+    val bestShotUri: String?,
     val memberCount: Int,
     val blurryCount: Int,
-    val createdAt: Long = System.currentTimeMillis()
-)
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(typeAffinity = ColumnInfo.BLOB)
+    val centroidEmbedding: ByteArray? = null
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ClusterEntity) return false
+        return id == other.id && label == other.label && memberCount == other.memberCount
+            && blurryCount == other.blurryCount && centroidEmbedding.contentEquals(other.centroidEmbedding)
+    }
+    override fun hashCode(): Int {
+        var result = id
+        result = 31 * result + label.hashCode()
+        result = 31 * result + memberCount
+        result = 31 * result + blurryCount
+        return result
+    }
+}
 
 /**
  * Tracks deleted items for undo snackbar + 30-day recycle bin purge.

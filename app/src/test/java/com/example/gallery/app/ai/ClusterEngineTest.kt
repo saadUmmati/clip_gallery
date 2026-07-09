@@ -21,7 +21,7 @@ class ClusterEngineTest {
 
     @Test
     fun `single image returns one cluster`() {
-        val embeddings = mapOf("uri1" to FloatArray(512) { 1f / 512f })
+        val embeddings = mapOf("uri1" to FloatArray(384) { 1f / 384f })
         val sharpness = mapOf("uri1" to 100f)
         val result = clusterEngine.cluster(embeddings, sharpness)
         assertEquals(1, result.size)
@@ -32,8 +32,8 @@ class ClusterEngineTest {
     @Test
     fun `similar images are clustered together`() {
         // Two nearly identical vectors (cosine distance close to 0)
-        val vec1 = FloatArray(512) { if (it < 256) 1f else 0f }
-        val vec2 = FloatArray(512) { if (it < 256) 0.99f else 0.01f }
+        val vec1 = FloatArray(384) { if (it < 256) 1f else 0f }
+        val vec2 = FloatArray(384) { if (it < 256) 0.99f else 0.01f }
         // Normalize vectors
         normalize(vec1)
         normalize(vec2)
@@ -49,13 +49,12 @@ class ClusterEngineTest {
 
     @Test
     fun `dissimilar images are in different clusters`() {
-        // Two very different vectors (cosine distance close to 2)
-        val vec1 = FloatArray(512) { if (it < 256) 1f else 0f }
-        val vec2 = FloatArray(512) { if (it >= 256) 1f else 0f }
+        val vec1 = floatArrayOf(1f, 0f, 0f, 0f)
+        val vec2 = floatArrayOf(0f, 0f, 0f, 1f)
         normalize(vec1)
         normalize(vec2)
 
-        val embeddings = mapOf("uri1" to vec1, "uri2" to vec2)
+        val embeddings = linkedMapOf("uri1" to vec1, "uri2" to vec2)
         val sharpness = mapOf("uri1" to 100f, "uri2" to 100f)
         val result = clusterEngine.cluster(embeddings, sharpness)
 
@@ -65,9 +64,9 @@ class ClusterEngineTest {
     @Test
     fun `best shot is the sharpest image`() {
         // Create vectors that are very similar (low cosine distance)
-        val vec1 = FloatArray(512) { if (it < 10) 1f else 0f }
-        val vec2 = FloatArray(512) { if (it < 10) 0.99f else 0.01f }
-        val vec3 = FloatArray(512) { if (it < 10) 0.98f else 0.02f }
+        val vec1 = FloatArray(384) { if (it < 10) 1f else 0f }
+        val vec2 = FloatArray(384) { if (it < 10) 0.99f else 0.01f }
+        val vec3 = FloatArray(384) { if (it < 10) 0.98f else 0.02f }
         normalize(vec1)
         normalize(vec2)
         normalize(vec3)
@@ -96,7 +95,7 @@ class ClusterEngineTest {
     @Test
     fun `blurry threshold works correctly`() {
         // Use identical vectors so they cluster together
-        val vec = FloatArray(512) { if (it < 10) 1f else 0f }
+        val vec = FloatArray(384) { if (it < 10) 1f else 0f }
         normalize(vec)
         val embeddings = mapOf(
             "below" to vec.copyOf(),
@@ -114,18 +113,24 @@ class ClusterEngineTest {
     }
 
     @Test
-    fun `large dataset uses individual clusters`() {
-        // Create 10001 embeddings to trigger the guard
-        val embeddings = (0..10000).associate { i ->
-            "uri$i" to FloatArray(512) { 1f / 512f }
+    fun `large dataset clusters correctly`() {
+        // Create 5000 embeddings: 5 groups of 1000 similar vectors
+        val embeddings = mutableMapOf<String, FloatArray>()
+        val sharpness = mutableMapOf<String, Float>()
+        for (group in 0 until 5) {
+            for (i in 0 until 1000) {
+                val uri = "uri_${group}_$i"
+                embeddings[uri] = FloatArray(384) { if (it in group*76 until (group+1)*76) 1f else 0.01f }
+                sharpness[uri] = 100f
+            }
         }
-        val sharpness = mapOf("uri0" to 100f)
         val result = clusterEngine.cluster(embeddings, sharpness)
 
-        // Should return each image as its own cluster
-        assertEquals(10001, result.size)
+        // Should produce ~5 clusters (one per group)
+        assertTrue("Expected ~5 clusters, got ${result.size}", result.size in 3..7)
+        // Each cluster should have many members
         result.forEach { cluster ->
-            assertEquals(1, cluster.memberUris.size)
+            assertTrue("Cluster has ${cluster.memberUris.size} members, expected >100", cluster.memberUris.size > 100)
         }
     }
 

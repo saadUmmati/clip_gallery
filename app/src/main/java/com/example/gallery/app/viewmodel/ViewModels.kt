@@ -1,6 +1,7 @@
 package com.example.gallery.app.viewmodel
 
 
+import android.util.Log
 import androidx.lifecycle.*
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
@@ -10,6 +11,7 @@ import com.example.gallery.app.ai.SemanticSearchEngine
 import com.example.gallery.app.ai.TextEncoder
 import com.example.gallery.app.ai.TimelineEngine
 import com.example.gallery.app.data.db.entities.ClusterEntity
+import com.example.gallery.app.data.db.entities.FolderInfo
 import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.data.repository.ClusterRepository
 import com.example.gallery.app.data.repository.DeletionRepository
@@ -58,10 +60,17 @@ class GalleryViewModel @Inject constructor(
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val pagedMedia: Flow<PagingData<MediaItemEntity>> = combine(
-        _searchQuery, _folderFilter
-    ) { query, folder -> Pair(query, folder) }
-        .flatMapLatest { (query, folder) ->
+        _searchQuery, _folderFilter, _semanticResults
+    ) { query, folder, semanticUris -> Triple(query, folder, semanticUris) }
+        .flatMapLatest { (query, folder, semanticUris) ->
             when {
+                query.isNotBlank() && semanticUris.isNotEmpty() -> {
+                    if (folder != null) {
+                        mediaRepository.getMediaByUrisAndFolderPaged(semanticUris, folder)
+                    } else {
+                        mediaRepository.getMediaByUrisPaged(semanticUris)
+                    }
+                }
                 folder != null && query.isNotBlank() ->
                     mediaRepository.searchMediaByFolderPaged(query, folder)
                 folder != null ->
@@ -120,6 +129,10 @@ class GalleryViewModel @Inject constructor(
     fun clearSelection() {
         _selectedUris.value = emptySet()
         _selectionMode.value = false
+    }
+
+    fun selectAllVisible(media: List<MediaItemEntity>) {
+        _selectedUris.value = media.map { it.uri }.toSet()
     }
 
     private val _scanState = MutableStateFlow<ScanState>(ScanState.Idle)
@@ -184,7 +197,7 @@ class GalleryViewModel @Inject constructor(
                 _semanticResults.value = results.map { it.uri }
                 _searchStatus.value = if (results.isEmpty()) "No results" else ""
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("GalleryViewModel", "Semantic search failed", e)
                 _searchStatus.value = "Search failed"
                 _semanticResults.value = emptyList()
             }
@@ -214,6 +227,9 @@ class OptimizeViewModel @Inject constructor(
     val allClusters: LiveData<List<ClusterEntity>> =
         clusterRepository.getAllClusters().asLiveData()
 
+    val allFolders: LiveData<List<FolderInfo>> =
+        mediaRepository.getAllFolders().asLiveData()
+
     val allMedia: LiveData<List<MediaItemEntity>> =
         mediaRepository.getAllMedia().asLiveData()
 
@@ -227,8 +243,27 @@ class OptimizeViewModel @Inject constructor(
 
     val recycleBinSize: LiveData<Long> = deletionRepository.getRecycleBinSize()
 
+    init {
+        viewModelScope.launch { clusterRepository.refreshClusterCounts() }
+    }
+
     suspend fun getClusterPreviewUris(clusterId: Int, limit: Int = 4): List<String> =
         clusterRepository.getClusterPreviewUris(clusterId, limit)
+
+    suspend fun getFolderPreviewUris(folder: String, limit: Int = 4): List<String> =
+        mediaRepository.getPreviewUrisForFolder(folder, limit)
+
+    fun renameCluster(clusterId: Int, newLabel: String) {
+        viewModelScope.launch {
+            clusterRepository.renameCluster(clusterId, newLabel)
+        }
+    }
+
+    fun deleteCluster(clusterId: Int) {
+        viewModelScope.launch {
+            clusterRepository.removeEntireCluster(clusterId)
+        }
+    }
 
     private val _selectedUris = MutableStateFlow<Set<String>>(emptySet())
     val selectedUris: StateFlow<Set<String>> = _selectedUris.asStateFlow()
@@ -267,7 +302,7 @@ class OptimizeViewModel @Inject constructor(
         _selectedUris.value = items.map { it.uri }.toSet()
     }
 
-    fun selectDuplicates(@Suppress("UNUSED_PARAMETER") clusters: List<ClusterEntity>, allMedia: List<MediaItemEntity>) {
+    fun selectDuplicates(allMedia: List<MediaItemEntity>) {
         // Select all non-best-shot images from clusters with >1 member
         val toDelete = allMedia.filter { item ->
             !item.isBestShot && item.clusterId != null
@@ -279,17 +314,24 @@ class OptimizeViewModel @Inject constructor(
      * Moves selected images to the recycle bin.
      * Emits a UndoReady state so the UI can show a 5-second undo snackbar.
      */
-    fun moveSelectedToRecycleBin(allMedia: List<MediaItemEntity>) {
-        val uris = _selectedUris.value
+    fun moveSelectedToRecycleBin(allMedia: List<MediaItemEntity>, uris: List<String>) {
         if (uris.isEmpty()) return
 
         viewModelScope.launch {
             _deleteState.value = DeleteState.Moving
             val items = allMedia.filter { it.uri in uris }
             deletionRepository.moveToRecycleBin(items)
-            _deleteState.value = DeleteState.UndoReady(uris.toList())
+            _deleteState.value = DeleteState.UndoReady(uris)
             clearSelection()
         }
+    }
+
+    suspend fun requestTrash(uris: List<String>, launcher: androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest>) {
+        deletionRepository.requestTrash(uris, launcher)
+    }
+
+    suspend fun requestUntrash(uris: List<String>, launcher: androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest>) {
+        deletionRepository.requestUntrash(uris, launcher)
     }
 
     fun undoRecycleBin(uris: List<String>) {
@@ -334,11 +376,34 @@ class AIViewModel @Inject constructor(
     private val _processingState = MutableStateFlow<AiState>(AiState.Idle)
     val processingState: StateFlow<AiState> = _processingState.asStateFlow()
 
+    private var currentRequestId: java.util.UUID? = null
+
     fun startProcessing(workManager: WorkManager, uris: List<String>) {
         _processingState.value = AiState.Running(0, "Starting…")
         val request = AiProcessingWorker.buildRequest(uris)
+        currentRequestId = request.id
         workManager.enqueue(request)
+        observeWork(workManager, request)
+    }
 
+    fun startProcessingAll(workManager: WorkManager) {
+        _processingState.value = AiState.Running(0, "Starting…")
+        val request = AiProcessingWorker.buildRequestAll()
+        currentRequestId = request.id
+        workManager.enqueue(request)
+        observeWork(workManager, request)
+    }
+
+    fun cancelProcessing(workManager: WorkManager) {
+        val id = currentRequestId
+        if (id != null) {
+            workManager.cancelWorkById(id)
+        }
+        _processingState.value = AiState.Idle
+        currentRequestId = null
+    }
+
+    private fun observeWork(workManager: WorkManager, request: androidx.work.OneTimeWorkRequest) {
         viewModelScope.launch {
             workManager.getWorkInfoByIdFlow(request.id)
                 .takeWhile { info -> info?.state?.isFinished != true }
@@ -346,12 +411,16 @@ class AIViewModel @Inject constructor(
                     info?.progress?.let { data ->
                         val status = data.getString("status") ?: "Processing…"
                         val processed = data.getInt("processed", 0)
-                        _processingState.value = AiState.Running(processed, status)
+                        val total = data.getInt("total", 0)
+                        _processingState.value = AiState.Running(processed, status, total)
                     }
                     if (info?.state?.isFinished == true) {
+                        currentRequestId = null
                         _processingState.value = if (info.state == WorkInfo.State.SUCCEEDED) {
                             val clusters = info.outputData.getInt("clusters", 0)
                             AiState.Done(clusters)
+                        } else if (info.state == WorkInfo.State.CANCELLED) {
+                            AiState.Idle
                         } else {
                             AiState.Error(info.outputData.getString("error") ?: "Unknown error")
                         }
@@ -362,7 +431,7 @@ class AIViewModel @Inject constructor(
 
     sealed class AiState {
         object Idle : AiState()
-        data class Running(val processed: Int, val status: String) : AiState()
+        data class Running(val processed: Int, val status: String, val total: Int = 0) : AiState()
         data class Done(val clusters: Int) : AiState()
         data class Error(val message: String) : AiState()
     }
@@ -386,8 +455,41 @@ class ClusterDetailViewModel @Inject constructor(
         .flatMapLatest { id -> mediaRepository.getMediaByCluster(id) }
         .asLiveData()
 
+    private val _selectedUris = MutableStateFlow<Set<String>>(emptySet())
+    val selectedUris: StateFlow<Set<String>> = _selectedUris.asStateFlow()
+
+    private val _selectionMode = MutableStateFlow(false)
+    val selectionMode: StateFlow<Boolean> = _selectionMode.asStateFlow()
+
     fun loadCluster(id: Int) {
         _clusterId.value = id
+    }
+
+    fun toggleSelection(uri: String) {
+        val current = _selectedUris.value.toMutableSet()
+        if (current.contains(uri)) current.remove(uri) else current.add(uri)
+        _selectedUris.value = current
+        if (current.isEmpty()) _selectionMode.value = false
+    }
+
+    fun enterSelectionMode(uri: String) {
+        _selectionMode.value = true
+        _selectedUris.value = setOf(uri)
+    }
+
+    fun clearSelection() {
+        _selectedUris.value = emptySet()
+        _selectionMode.value = false
+    }
+
+    fun removeFromCluster() {
+        val clusterId = _clusterId.value ?: return
+        val uris = _selectedUris.value.toList()
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            clusterRepository.removeFromCluster(uris, clusterId)
+            clearSelection()
+        }
     }
 }
 

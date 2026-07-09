@@ -50,9 +50,17 @@ class GalleryFragment : Fragment() {
         setupSearch()
         setupFab()
         setupVaultButton()
+        setupShareButton()
         setupViewToggle()
         setupFolderFilter()
+        setupEmptyStateCTA()
         observeViewModel()
+    }
+
+    private fun setupEmptyStateCTA() {
+        binding.btnGrantAccess.setOnClickListener {
+            (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.checkPermissionsAndScan()
+        }
     }
 
     private fun setupRecyclerView() {
@@ -84,28 +92,36 @@ class GalleryFragment : Fragment() {
     }
 
     private fun setupViewToggle() {
-        binding.fabToggleView.setOnClickListener {
+        binding.btnToggleView.setOnClickListener {
             isTimelineView = !isTimelineView
             if (isTimelineView) {
                 binding.recyclerView.visibility = View.GONE
                 binding.timelineRecyclerView.visibility = View.VISIBLE
+                binding.btnToggleView.setIconResource(R.drawable.ic_gallery)
             } else {
                 binding.recyclerView.visibility = View.VISIBLE
                 binding.timelineRecyclerView.visibility = View.GONE
+                binding.btnToggleView.setIconResource(R.drawable.ic_timeline)
             }
         }
     }
 
     private fun createGalleryAdapter(): GalleryGridAdapter {
         return GalleryGridAdapter(
-            onItemClick = { item ->
+            onItemClick = { item, view ->
                 if (viewModel.selectionMode.value) {
                     viewModel.toggleSelection(item.uri)
                 } else {
                     val intent = Intent(requireContext(), FullscreenViewerActivity::class.java).apply {
                         putExtra(FullscreenViewerActivity.EXTRA_URI, item.uri)
+                        putExtra("transition_name", view.transitionName)
                     }
-                    startActivity(intent)
+                    val options = androidx.core.app.ActivityOptionsCompat.makeSceneTransitionAnimation(
+                        requireActivity(),
+                        view,
+                        view.transitionName
+                    )
+                    startActivity(intent, options.toBundle())
                 }
             },
             onLongPress = { item ->
@@ -118,7 +134,7 @@ class GalleryFragment : Fragment() {
     }
 
     private fun setupFab() {
-        binding.fabSendToAi.setOnClickListener {
+        binding.btnSendToAi.setOnClickListener {
             val selected = viewModel.selectedUris.value
             if (selected.isEmpty()) return@setOnClickListener
 
@@ -128,13 +144,13 @@ class GalleryFragment : Fragment() {
                 uris
             )
 
-            (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.switchToAlbumsTab()
+            (requireActivity() as? com.example.gallery.app.ui.MainActivity)?.switchToOptimizeTab()
             viewModel.clearSelection()
         }
     }
 
     private fun setupVaultButton() {
-        binding.fabMoveToVault.setOnClickListener {
+        binding.btnMoveToVault.setOnClickListener {
             val selected = viewModel.selectedUris.value
             if (selected.isEmpty()) return@setOnClickListener
 
@@ -150,6 +166,28 @@ class GalleryFragment : Fragment() {
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
+        }
+    }
+
+    private fun setupShareButton() {
+        binding.btnShare.setOnClickListener {
+            val selected = viewModel.selectedUris.value.toList()
+            if (selected.size == 1) {
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "image/*"
+                    putExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri.parse(selected[0]))
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(android.content.Intent.createChooser(shareIntent, getString(R.string.share_via)))
+            } else if (selected.size > 1) {
+                val uris = selected.map { android.net.Uri.parse(it) } as ArrayList<android.net.Uri>
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "image/*"
+                    putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(android.content.Intent.createChooser(shareIntent, getString(R.string.share_via)))
+            }
         }
     }
 
@@ -238,8 +276,15 @@ class GalleryFragment : Fragment() {
                 adapter.selectionMode = isSelectionMode
                 if (!isSelectionMode) {
                     adapter.selectedUris = emptySet()
+                    binding.selectionBar.visibility = View.GONE
                 }
             }
+        }
+
+        // Select All button
+        binding.btnSelectAll.setOnClickListener {
+            val currentItems = adapter.snapshot().items
+            viewModel.selectAllVisible(currentItems)
         }
 
         // Observe selected URIs
@@ -248,18 +293,26 @@ class GalleryFragment : Fragment() {
                 adapter.selectedUris = uris
 
                 if (uris.isNotEmpty()) {
-                    binding.fabSendToAi.text = getString(R.string.send_to_ai_count, uris.size)
-                    if (binding.fabSendToAi.visibility != View.VISIBLE) {
-                        binding.fabSendToAi.visibility = View.VISIBLE
-                        binding.fabSendToAi.extend()
-                    }
-                    if (binding.fabMoveToVault.visibility != View.VISIBLE) {
-                        binding.fabMoveToVault.visibility = View.VISIBLE
-                        binding.fabMoveToVault.extend()
+                    binding.selectedCount.text = getString(R.string.selected_count, uris.size)
+                    if (binding.selectionBar.visibility != View.VISIBLE) {
+                        binding.selectionBar.visibility = View.VISIBLE
+                        binding.selectionBar.alpha = 0f
+                        binding.selectionBar.translationY = 100f
+                        binding.selectionBar.animate()
+                            .alpha(1f)
+                            .translationY(0f)
+                            .setDuration(250)
+                            .start()
                     }
                 } else {
-                    binding.fabSendToAi.visibility = View.GONE
-                    binding.fabMoveToVault.visibility = View.GONE
+                    if (binding.selectionBar.visibility == View.VISIBLE) {
+                        binding.selectionBar.animate()
+                            .alpha(0f)
+                            .translationY(100f)
+                            .setDuration(200)
+                            .withEndAction { binding.selectionBar.visibility = View.GONE }
+                            .start()
+                    }
                 }
             }
         }
@@ -269,9 +322,11 @@ class GalleryFragment : Fragment() {
             aiViewModel.processingState.collectLatest { state ->
                 when (state) {
                     is AIViewModel.AiState.Running -> {
-                        binding.fabSendToAi.visibility = View.GONE
+                        binding.btnSendToAi.isEnabled = false
                     }
-                    else -> { }
+                    is AIViewModel.AiState.Idle, is AIViewModel.AiState.Done, is AIViewModel.AiState.Error -> {
+                        binding.btnSendToAi.isEnabled = true
+                    }
                 }
             }
         }

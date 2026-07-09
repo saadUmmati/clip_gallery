@@ -236,7 +236,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ── Clusters Section ── -->
+            <!-- ── AI Groups Section ── -->
             <LinearLayout
                 android:id="@+id/clusterSection"
                 android:layout_width="match_parent"
@@ -257,7 +257,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Clusters"
+                        android:text="AI Groups"
                         android:textColor="@color/text_primary"
                         android:textSize="15sp"
                         android:fontFamily="sans-serif-medium" />
@@ -277,8 +277,9 @@
                     android:id="@+id/recyclerClusters"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:nestedScrollingEnabled="false"
-                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+                    android:clipToPadding="false"
+                    android:paddingHorizontal="4dp"
+                    android:nestedScrollingEnabled="false" />
 
             </LinearLayout>
 
@@ -325,7 +326,9 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:nestedScrollingEnabled="false"
-                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+                    android:padding="2dp"
+                    app:layoutManager="androidx.recyclerview.widget.GridLayoutManager"
+                    app:spanCount="3" />
 
             </LinearLayout>
 

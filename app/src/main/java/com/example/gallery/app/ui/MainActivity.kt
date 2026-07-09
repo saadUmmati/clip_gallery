@@ -60,10 +60,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        setupTabs()
+        setupNavigation()
         observeScanState()
-        checkPermissionsAndScan()
-        setupVaultAccess()
+        checkPermissions()
 
         supportFragmentManager.addOnBackStackChangedListener {
             val hasBackStack = supportFragmentManager.backStackEntryCount > 0
@@ -72,25 +71,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupTabs() {
+    private fun setupNavigation() {
         val adapter = MainPagerAdapter(this)
         binding.viewPager.adapter = adapter
         binding.viewPager.offscreenPageLimit = 1
+        binding.viewPager.isUserInputEnabled = false
 
-        TabLayoutMediator(binding.tabLayout, binding.viewPager) { tab, position ->
-            tab.text = when (position) {
-                0 -> getString(R.string.tab_gallery)
-                1 -> getString(R.string.tab_albums)
-                2 -> getString(R.string.tab_optimize)
-                else -> ""
+        binding.bottomNavigation.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_gallery -> {
+                    binding.viewPager.currentItem = 0
+                    true
+                }
+                R.id.nav_albums -> {
+                    binding.viewPager.currentItem = 1
+                    true
+                }
+                R.id.nav_optimize -> {
+                    binding.viewPager.currentItem = 2
+                    true
+                }
+                R.id.nav_vault -> {
+                    val intent = android.content.Intent(this, com.example.gallery.app.ui.vault.VaultActivity::class.java)
+                    startActivity(intent)
+                    false
+                }
+                else -> false
             }
-            tab.setIcon(when (position) {
-                0 -> R.drawable.ic_gallery
-                1 -> R.drawable.ic_albums
-                2 -> R.drawable.ic_optimize
-                else -> 0
-            })
-        }.attach()
+        }
+
+        binding.viewPager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                super.onPageSelected(position)
+                if (position in 0..2) {
+                    binding.bottomNavigation.menu.getItem(position).isChecked = true
+                }
+            }
+        })
     }
 
     private fun observeScanState() {
@@ -120,8 +137,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkPermissionsAndScan() {
-        val permissions = when {
+    private fun checkPermissions() {
+        val permissions = getRequiredPermissions()
+        val hasAccess = permissions.any {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (!hasAccess) {
+            permissionLauncher.launch(permissions)
+        }
+    }
+
+    private fun getRequiredPermissions(): Array<String> {
+        return when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
                 arrayOf(
                     Manifest.permission.READ_MEDIA_IMAGES,
@@ -135,7 +162,10 @@ class MainActivity : AppCompatActivity() {
                 arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
         }
+    }
 
+    fun checkPermissionsAndScan() {
+        val permissions = getRequiredPermissions()
         val hasAccess = permissions.any {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
@@ -161,24 +191,16 @@ class MainActivity : AppCompatActivity() {
         }.show()
     }
 
-    private fun setupVaultAccess() {
-        binding.toolbar.setOnLongClickListener {
-            val intent = android.content.Intent(this, com.example.gallery.app.ui.vault.VaultActivity::class.java)
-            startActivity(intent)
-            true
-        }
-    }
-
     fun switchToOptimizeTab() {
-        binding.viewPager.currentItem = 2
+        binding.bottomNavigation.selectedItemId = R.id.nav_optimize
     }
 
     fun switchToGalleryTab() {
-        binding.viewPager.currentItem = 0
+        binding.bottomNavigation.selectedItemId = R.id.nav_gallery
     }
 
     fun switchToAlbumsTab() {
-        binding.viewPager.currentItem = 1
+        binding.bottomNavigation.selectedItemId = R.id.nav_albums
     }
 
     inner class MainPagerAdapter(activity: AppCompatActivity) : FragmentStateAdapter(activity) {

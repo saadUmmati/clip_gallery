@@ -1,5 +1,6 @@
 package com.example.gallery.app.ui.viewer
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -19,12 +20,13 @@ import com.example.gallery.app.R
 import com.example.gallery.app.data.db.entities.MediaItemEntity
 import com.example.gallery.app.databinding.ActivityFullscreenViewerBinding
 import com.example.gallery.app.security.VaultCryptoManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
-class FullscreenViewerActivity : AppCompatActivity() {
+class FullscreenViewerActivity : AppCompatActivity(), ImageInteractionListener {
 
     private lateinit var binding: ActivityFullscreenViewerBinding
     private val viewModel: ViewerViewModel by viewModels()
@@ -48,6 +50,16 @@ class FullscreenViewerActivity : AppCompatActivity() {
         binding = ActivityFullscreenViewerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        window.sharedElementEnterTransition = com.google.android.material.transition.platform.MaterialContainerTransform().apply {
+            addTarget(android.R.id.content)
+            duration = 300L
+        }
+        window.sharedElementReturnTransition = com.google.android.material.transition.platform.MaterialContainerTransform().apply {
+            addTarget(android.R.id.content)
+            duration = 250L
+        }
+
+        postponeEnterTransition()
         binding.viewPager.keepScreenOn = true
         hideSystemBars()
 
@@ -57,11 +69,21 @@ class FullscreenViewerActivity : AppCompatActivity() {
         val isVault = intent.getBooleanExtra(EXTRA_IS_VAULT, false)
         val isBlurry = intent.getBooleanExtra(EXTRA_IS_BLURRY, false)
 
+        val transitionName = intent.getStringExtra("transition_name")
+        binding.viewPager.transitionName = transitionName
+
         setupToolbar()
-        setupTapToToggle()
         observeViewModel(position)
 
         viewModel.loadMedia(clusterId, isVault, isBlurry)
+    }
+
+    override fun onImageSingleTap() {
+        toggleSystemBars()
+    }
+
+    override fun onImageSwipeUp() {
+        showMetadata()
     }
 
     private fun observeViewModel(initialPosition: Int) {
@@ -131,13 +153,46 @@ class FullscreenViewerActivity : AppCompatActivity() {
         binding.toolbar.inflateMenu(R.menu.menu_viewer)
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
             when (menuItem.itemId) {
+                R.id.action_share -> {
+                    shareCurrentImage()
+                    true
+                }
                 R.id.action_info -> {
                     showMetadata()
+                    true
+                }
+                R.id.action_delete -> {
+                    deleteCurrentImage()
                     true
                 }
                 else -> false
             }
         }
+    }
+
+    private fun deleteCurrentImage() {
+        val pos = binding.viewPager.currentItem
+        if (pos !in currentImages.indices) return
+        val image = currentImages[pos]
+        val isVault = intent.getBooleanExtra(EXTRA_IS_VAULT, false)
+
+        val messageRes = if (isVault) R.string.confirm_vault_delete else R.string.confirm_move_message
+        val titleRes = if (isVault) R.string.vault_delete else R.string.confirm_move_title
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(getString(titleRes))
+            .setMessage(getString(messageRes, 1))
+            .setPositiveButton(getString(R.string.move_confirm)) { _, _ ->
+                val entity = viewModel.mediaItems.value.firstOrNull { it.uri == image.uri }
+                if (entity != null) {
+                    viewModel.deleteItem(entity, isVault)
+                    if (currentImages.size <= 1) {
+                        finish()
+                    }
+                }
+            }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
     }
 
     private fun showMetadata() {
@@ -156,11 +211,19 @@ class FullscreenViewerActivity : AppCompatActivity() {
         sheet.show(supportFragmentManager, MetadataBottomSheet.TAG)
     }
 
-    private fun setupTapToToggle() {
-        binding.viewPager.setOnClickListener {
-            toggleSystemBars()
+    private fun shareCurrentImage() {
+        val pos = binding.viewPager.currentItem
+        if (pos !in currentImages.indices) return
+        val uri = android.net.Uri.parse(currentImages[pos].uri)
+
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = currentImages[pos].mimeType ?: "image/*"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        startActivity(Intent.createChooser(shareIntent, getString(R.string.share_via)))
     }
+
 
     private fun updatePageCounter(current: Int, total: Int) {
         if (total <= 1) {
@@ -179,6 +242,7 @@ class FullscreenViewerActivity : AppCompatActivity() {
         isSystemBarsVisible = false
         isToolbarVisible = false
         binding.toolbar.visibility = View.GONE
+        binding.bottomActionsBar.visibility = View.GONE
         binding.pageCounter.alpha = 0f
     }
 
@@ -209,6 +273,14 @@ class FullscreenViewerActivity : AppCompatActivity() {
             .setInterpolator(DecelerateInterpolator())
             .start()
 
+        binding.bottomActionsBar.visibility = View.VISIBLE
+        binding.bottomActionsBar.alpha = 0f
+        binding.bottomActionsBar.animate()
+            .alpha(1f)
+            .setDuration(250)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+
         if (binding.pageCounter.isVisible) {
             binding.pageCounter.animate()
                 .alpha(1f)
@@ -225,6 +297,13 @@ class FullscreenViewerActivity : AppCompatActivity() {
             .setDuration(200)
             .setInterpolator(DecelerateInterpolator())
             .withEndAction { binding.toolbar.visibility = View.GONE }
+            .start()
+
+        binding.bottomActionsBar.animate()
+            .alpha(0f)
+            .setDuration(200)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction { binding.bottomActionsBar.visibility = View.GONE }
             .start()
 
         binding.pageCounter.animate()
